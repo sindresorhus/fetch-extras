@@ -24,6 +24,13 @@ export async function throwIfHttpError(responseOrPromise) {
 	return responseOrPromise;
 }
 
+export function withHttpError(fetchFunction) {
+	return async (urlOrRequest, options = {}) => {
+		const response = await fetchFunction(urlOrRequest, options);
+		return throwIfHttpError(response);
+	};
+}
+
 export function withTimeout(fetchFunction, timeout) {
 	return async (urlOrRequest, options = {}) => {
 		const providedSignal = options.signal ?? (urlOrRequest instanceof Request && urlOrRequest.signal);

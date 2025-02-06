@@ -4,10 +4,7 @@
 
 > Useful utilities for working with [Fetch](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API)
 
-> [!WARNING]
-> This package is still a work in progress.
-
-For more features and conveniences on top of Fetch, check out my [`ky`](https://github.com/sindresorhus/ky) package.
+*For more features and conveniences on top of Fetch, check out my [`ky`](https://github.com/sindresorhus/ky) package.*
 
 ## Install
 
@@ -18,9 +15,15 @@ npm install fetch-extras
 ## Usage
 
 ```js
-import {throwIfHttpError} from 'fetch-extras';
+import {withHttpError, withTimeout} from 'fetch-extras';
 
-const response = await throwIfHttpError(fetch('/api'));
+// Create an enhanced reusable fetch function that:
+// - Throws errors for non-200 responses
+// - Times out after 5 seconds
+const enhancedFetch = withHttpError(withTimeout(fetch, 5000));
+
+const response = await enhancedFetch('/api');
+const data = await response.json();
 ```
 
 ## API

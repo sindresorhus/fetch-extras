@@ -1,5 +1,10 @@
 import test from 'ava';
-import {HttpError, throwIfHttpError, withTimeout} from './index.js';
+import {
+	HttpError,
+	throwIfHttpError,
+	withHttpError,
+	withTimeout,
+} from './index.js';
 
 const createBasicMockFetch = () => async url => {
 	if (url === '/ok') {
@@ -18,23 +23,6 @@ const createBasicMockFetch = () => async url => {
 		url,
 	};
 };
-
-test('throwIfHttpError - should not throw for ok responses', async t => {
-	const mockFetch = createBasicMockFetch();
-	const response = await mockFetch('/ok');
-	await t.notThrowsAsync(throwIfHttpError(response));
-});
-
-test('throwIfHttpError - should throw HttpError for non-ok responses', async t => {
-	const mockFetch = createBasicMockFetch();
-	const response = await mockFetch('/not-found');
-	await t.throwsAsync(throwIfHttpError(response), {instanceOf: HttpError});
-});
-
-test('throwIfHttpError - should work with promise responses', async t => {
-	const mockFetch = createBasicMockFetch();
-	await t.throwsAsync(throwIfHttpError(mockFetch('/not-found')), {instanceOf: HttpError});
-});
 
 const createTimedMockFetch = delay => async (url, options = {}) => {
 	if (options.signal?.aborted) {
@@ -61,6 +49,71 @@ const createTimedMockFetch = delay => async (url, options = {}) => {
 		});
 	});
 };
+
+test('throwIfHttpError - should not throw for ok responses', async t => {
+	const mockFetch = createBasicMockFetch();
+	const response = await mockFetch('/ok');
+	await t.notThrowsAsync(throwIfHttpError(response));
+});
+
+test('throwIfHttpError - should throw HttpError for non-ok responses', async t => {
+	const mockFetch = createBasicMockFetch();
+	const response = await mockFetch('/not-found');
+	await t.throwsAsync(throwIfHttpError(response), {instanceOf: HttpError});
+});
+
+test('throwIfHttpError - should work with promise responses', async t => {
+	const mockFetch = createBasicMockFetch();
+	await t.throwsAsync(throwIfHttpError(mockFetch('/not-found')), {instanceOf: HttpError});
+});
+
+test('withHttpError - should pass through successful responses', async t => {
+	const mockFetch = createBasicMockFetch();
+	const fetchWithError = withHttpError(mockFetch);
+
+	const response = await fetchWithError('/ok');
+	t.deepEqual(response, {
+		ok: true,
+		status: 200,
+		statusText: 'OK',
+		url: '/ok',
+	});
+});
+
+test('withHttpError - should throw HttpError for error responses', async t => {
+	const mockFetch = createBasicMockFetch();
+	const fetchWithError = withHttpError(mockFetch);
+
+	const error = await t.throwsAsync(fetchWithError('/not-found'), {instanceOf: HttpError});
+	t.is(error.response.status, 404);
+});
+
+test('withHttpError - can be combined with withTimeout', async t => {
+	const mockFetch = createTimedMockFetch(50);
+	const fetchWithTimeoutAndError = withHttpError(withTimeout(mockFetch, 1000));
+
+	const response = await fetchWithTimeoutAndError('/test');
+	t.deepEqual(response, {
+		ok: true,
+		status: 200,
+		statusText: 'OK',
+		url: '/test',
+	});
+});
+
+test('withHttpError - throws HttpError even with timeout', async t => {
+	const mockFetch = async url => ({
+		ok: false,
+		status: 500,
+		statusText: 'Internal Server Error',
+		url,
+	});
+
+	const fetchWithTimeoutAndError = withHttpError(withTimeout(mockFetch, 1000));
+
+	const error = await t.throwsAsync(fetchWithTimeoutAndError('/test'), {instanceOf: HttpError});
+	t.is(error.response.status, 500);
+});
 
 test('withTimeout - should abort request after timeout', async t => {
 	const slowFetch = createTimedMockFetch(200);
