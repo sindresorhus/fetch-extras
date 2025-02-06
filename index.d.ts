@@ -48,3 +48,23 @@ const data = await response.json();
 ```
 */
 export function throwIfHttpError(responsePromise: Promise<Response>): Promise<Response>;
+
+/**
+Wraps a fetch function with timeout functionality.
+
+@param fetchFunction - The fetch function to wrap (usually the global `fetch`).
+@param timeout - Timeout in milliseconds.
+@returns A wrapped fetch function that will abort if the request takes longer than the specified timeout.
+
+@example
+```
+import {withTimeout} from 'fetch-extras';
+
+const fetchWithTimeout = withTimeout(fetch, 5000);
+const response = await fetchWithTimeout('/api');
+const data = await response.json();
+*/
+export function withTimeout(
+	fetchFunction: typeof fetch,
+	timeout: number
+): typeof fetch;
