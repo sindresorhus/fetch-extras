@@ -1,6 +1,6 @@
 {
 	"name": "fetch-extras",
-	"version": "0.1.0",
+	"version": "1.0.0",
 	"description": "Useful utilities for working with Fetch",
 	"license": "MIT",
 	"repository": "sindresorhus/fetch-extras",
