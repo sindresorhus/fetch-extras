@@ -12,19 +12,18 @@
 	},
 	"type": "module",
 	"exports": {
-		"types": "./index.d.ts",
-		"default": "./index.js"
+		"types": "./source/index.d.ts",
+		"default": "./source/index.js"
 	},
 	"sideEffects": false,
 	"engines": {
 		"node": ">=18.18"
 	},
 	"scripts": {
-		"test": "xo && ava && tsc index.d.ts"
+		"test": "xo && ava && tsc source/index.d.ts"
 	},
 	"files": [
-		"index.js",
-		"index.d.ts"
+		"source"
 	],
 	"keywords": [
 		"fetch",

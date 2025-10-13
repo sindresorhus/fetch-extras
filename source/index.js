@@ -1,3 +1,5 @@
+export {paginate} from './paginate.js';
+
 export class HttpError extends Error {
 	constructor(response) {
 		const status = `${response.status} ${response.statusText}`.trim();

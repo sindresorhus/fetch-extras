@@ -4,7 +4,7 @@ import {
 	throwIfHttpError,
 	withHttpError,
 	withTimeout,
-} from './index.js';
+} from '../source/index.js';
 
 const createBasicMockFetch = () => async url => {
 	if (url === '/ok') {
