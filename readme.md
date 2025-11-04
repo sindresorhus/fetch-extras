@@ -34,3 +34,4 @@ See the [types](index.d.ts) for now.
 
 - [is-network-error](https://github.com/sindresorhus/is-network-error) - Check if a value is a Fetch network error
 - [ky](https://github.com/sindresorhus/ky) - HTTP client based on Fetch
+- [parse-sse](https://www.npmjs.com/package/parse-sse) - Parse Server-Sent Events (SSE) from a Response
