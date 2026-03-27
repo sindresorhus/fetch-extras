@@ -6,6 +6,9 @@ Paginate through API responses using async iteration. By default, it automatical
 
 Returns an async iterator that yields items from each page.
 
+> [!NOTE]
+> This function does not check response status codes. If you need error handling for non-2xx responses, wrap fetch with `withHttpError()` or handle errors in your `transform` function.
+
 ```js
 import {paginate} from 'fetch-extras';
 

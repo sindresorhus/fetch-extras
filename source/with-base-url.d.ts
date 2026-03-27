@@ -24,7 +24,10 @@ const fetch2 = withBaseUrl(fetch, 'https://api.example.com/v1/');
 await fetch1('users'); // https://api.example.com/v1/users
 await fetch2('users'); // https://api.example.com/v1/users
 await fetch1('?page=2'); // https://api.example.com/v1?page=2
+```
 
+@example
+```
 import {withBaseUrl, withHttpError, withTimeout} from 'fetch-extras';
 
 const fetchWithAll = withHttpError(
@@ -34,7 +37,18 @@ const fetchWithAll = withHttpError(
 	)
 );
 
-const anotherResponse = await fetchWithAll('/users');
+const response = await fetchWithAll('/users');
+```
+
+@example
+```
+import {paginate, withBaseUrl} from 'fetch-extras';
+
+const fetchWithBaseUrl = withBaseUrl(fetch, 'https://api.github.com');
+
+for await (const commit of paginate('/repos/sindresorhus/ky/commits', {fetchFunction: fetchWithBaseUrl})) {
+	console.log(commit.sha);
+}
 ```
 */
 export function withBaseUrl(

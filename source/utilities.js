@@ -1,3 +1,5 @@
+export const blockedDefaultHeaderNamesSymbol = Symbol('blockedDefaultHeaderNames');
+
 /**
 Creates a promise that resolves after the specified delay.
 

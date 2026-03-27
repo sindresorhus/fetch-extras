@@ -34,7 +34,7 @@ test('withTimeout - should abort request after timeout', async t => {
 	await t.throwsAsync(fetchWithTimeout('/test'), {name: 'AbortError'});
 });
 
-test('withTimeout - should respect existing abort signal', async t => {
+test('withTimeout - should respect existing abort signal via options', async t => {
 	const mockFetch = createTimedMockFetch(100);
 	const fetchWithTimeout = withTimeout(mockFetch, 1000);
 	const controller = new AbortController();
@@ -42,6 +42,17 @@ test('withTimeout - should respect existing abort signal', async t => {
 	controller.abort();
 
 	await t.throwsAsync(fetchWithTimeout('/test', {signal: controller.signal}), {name: 'AbortError'});
+});
+
+test('withTimeout - should respect abort signal from a Request object', async t => {
+	const mockFetch = createTimedMockFetch(100);
+	const fetchWithTimeout = withTimeout(mockFetch, 1000);
+	const controller = new AbortController();
+
+	controller.abort();
+
+	const request = new Request('https://example.com/test', {signal: controller.signal});
+	await t.throwsAsync(fetchWithTimeout(request), {name: 'AbortError'});
 });
 
 test('withTimeout - should complete before timeout', async t => {

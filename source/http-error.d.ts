@@ -1,5 +1,18 @@
 /**
 Custom error class for HTTP errors that should be thrown when the response has a non-2xx status code.
+
+@example
+```
+import {HttpError, throwIfHttpError} from 'fetch-extras';
+
+try {
+	await throwIfHttpError(fetch('/api'));
+} catch (error) {
+	if (error instanceof HttpError) {
+		console.log(error.response.status); // 404
+	}
+}
+```
 */
 export class HttpError extends Error {
 	readonly name: 'HttpError';
@@ -52,7 +65,7 @@ export function throwIfHttpError(responsePromise: Promise<Response>): Promise<Re
 /**
 Wraps a fetch function to automatically throw `HttpError` for non-2xx responses.
 
-Can be combined with other `with*` methods.
+Can be combined with other `with*` functions.
 
 @param fetchFunction - The fetch function to wrap (usually the global `fetch`).
 @returns A wrapped fetch function that will throw HttpError for non-2xx responses.

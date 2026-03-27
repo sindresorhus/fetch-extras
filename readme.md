@@ -4,7 +4,9 @@
 
 > Useful utilities for working with [Fetch](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API)
 
-*For more features and conveniences on top of Fetch, check out my [`ky`](https://github.com/sindresorhus/ky) package.*
+Great for creating tiny custom HTTP clients without a heavy dependency.
+
+*For a full-featured HTTP client on top of Fetch, check out my [`ky`](https://github.com/sindresorhus/ky) package.*
 
 ## Install
 
@@ -15,14 +17,24 @@ npm install fetch-extras
 ## Usage
 
 ```js
-import {withHttpError, withTimeout} from 'fetch-extras';
+import {withHttpError, withTimeout, withBaseUrl, withHeaders} from 'fetch-extras';
 
-// Create an enhanced reusable fetch function that:
+// Create a tiny reusable API client that:
+// - Sends auth headers on every request
+// - Uses a base URL so you only write paths
 // - Throws errors for non-2xx responses
 // - Times out after 5 seconds
-const enhancedFetch = withHttpError(withTimeout(fetch, 5000));
+const apiFetch = withHeaders(
+	withHttpError(
+		withBaseUrl(
+			withTimeout(fetch, 5000),
+			'https://api.example.com',
+		),
+	),
+	{Authorization: 'Bearer my-token'},
+);
 
-const response = await enhancedFetch('/api');
+const response = await apiFetch('/users');
 const data = await response.json();
 ```
 
@@ -33,6 +45,7 @@ const data = await response.json();
 - [`withHttpError`](docs/http-error.md#withhttperrorfetchfunction)
 - [`withTimeout`](docs/with-timeout.md)
 - [`withBaseUrl`](docs/with-base-url.md)
+- [`withHeaders`](docs/with-headers.md)
 - [`paginate`](docs/paginate.md)
 
 ## Related

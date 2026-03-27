@@ -1,5 +1,5 @@
 import parseLinkHeader from './parse-link-header.js';
-import {delay} from './utilities.js';
+import {blockedDefaultHeaderNamesSymbol, delay} from './utilities.js';
 
 const defaultPaginationOptions = {
 	async transform(response) {
@@ -62,6 +62,11 @@ const stripSensitiveHeaders = headers => {
 	return cleanedHeaders;
 };
 
+const markToBlockDefaultHeaders = (object, headerNames) => {
+	object[blockedDefaultHeaderNamesSymbol] = [...headerNames];
+	return object;
+};
+
 const methodCanHaveBody = method => method === undefined || !['get', 'head'].includes(method.toLowerCase());
 
 const requestSnapshot = request => ({
@@ -97,17 +102,6 @@ const stripBodyHeadersFromFetchOptions = fetchOptions => {
 	return {
 		...fetchOptions,
 		headers: stripBodyHeaders(fetchOptions.headers),
-	};
-};
-
-const stripSensitiveHeadersFromFetchOptions = fetchOptions => {
-	if (!('headers' in fetchOptions)) {
-		return fetchOptions;
-	}
-
-	return {
-		...fetchOptions,
-		headers: stripSensitiveHeaders(fetchOptions.headers),
 	};
 };
 
@@ -194,9 +188,20 @@ const requestWithoutSensitiveHeaders = request => ({
 });
 
 const stripInheritedSensitiveState = (requestTemplate, fetchOptions) => ({
-	requestTemplate: requestTemplate && new Request(requestTemplate.url, requestTemplate.body === null ? requestWithoutSensitiveHeaders(requestTemplate) : requestWithoutSensitiveState(requestTemplate)),
-	fetchOptions: Object.hasOwn(fetchOptions, 'body') && fetchOptions.body !== undefined ? normalizeBodylessFetchOptions(stripSensitiveHeadersFromFetchOptions(fetchOptions)) : stripSensitiveHeadersFromFetchOptions(fetchOptions),
+	requestTemplate: requestTemplate && markToBlockDefaultHeaders(new Request(requestTemplate.url, requestTemplate.body === null ? requestWithoutSensitiveHeaders(requestTemplate) : requestWithoutSensitiveState(requestTemplate)), sensitiveHeaderNames),
+	fetchOptions: Object.hasOwn(fetchOptions, 'body') && fetchOptions.body !== undefined ? normalizeBodylessFetchOptions(markSensitiveHeadersAsFinal(fetchOptions)) : markSensitiveHeadersAsFinal(fetchOptions),
 });
+
+const markSensitiveHeadersAsFinal = fetchOptions => {
+	if (!('headers' in fetchOptions)) {
+		return markToBlockDefaultHeaders({...fetchOptions}, sensitiveHeaderNames);
+	}
+
+	return markToBlockDefaultHeaders({
+		...fetchOptions,
+		headers: markToBlockDefaultHeaders(stripSensitiveHeaders(fetchOptions.headers), sensitiveHeaderNames),
+	}, sensitiveHeaderNames);
+};
 
 const hasSensitiveHeaders = headers => {
 	const normalizedHeaders = new Headers(headers);
@@ -321,7 +326,15 @@ export async function * paginate(input, options = {}) {
 			await delay(paginationOptions.backoff, {signal: currentSignal(requestTemplate, currentFetchOptions)});
 		}
 
-		const currentInput = requestTemplate ? new Request(currentUrl, requestTemplate.clone()) : currentUrl;
+		let currentInput = currentUrl;
+
+		if (requestTemplate) {
+			currentInput = new Request(currentUrl, requestTemplate.clone());
+
+			if (requestTemplate[blockedDefaultHeaderNamesSymbol]) {
+				markToBlockDefaultHeaders(currentInput, requestTemplate[blockedDefaultHeaderNamesSymbol]);
+			}
+		}
 
 		// eslint-disable-next-line no-await-in-loop
 		const response = await fetchFunction(currentInput, currentFetchOptions);

@@ -1,5 +1,5 @@
 import test from 'ava';
-import {paginate} from 'fetch-extras';
+import {paginate, withHeaders} from 'fetch-extras';
 import parseLinkHeader from '../source/parse-link-header.js';
 
 // Pagination tests - run serially since they modify globalThis.fetch
@@ -612,6 +612,86 @@ test.serial('paginate - preserves explicit Authorization overrides on cross-orig
 		{
 			url: 'https://evil.example/?page=2',
 			authorization: 'Bearer replacement',
+		},
+	]);
+});
+
+test.serial('paginate - does not reapply withHeaders Authorization defaults after cross-origin pagination strips them', async t => {
+	const {seenRequests, fetchFunction} = createRecordedRequestFetch({
+		nextLink: `<${crossOriginNextUrl}>; rel="next"`,
+	});
+	const fetchWithHeaders = withHeaders(fetchFunction, {
+		authorization: 'Bearer secret',
+	});
+
+	const items = await paginate.all('https://api.example.com/?page=1', {
+		fetchFunction: fetchWithHeaders,
+	});
+
+	t.deepEqual(items, [1, 2]);
+	t.deepEqual(seenRequests, [
+		{
+			url: 'https://api.example.com/?page=1',
+			authorization: 'Bearer secret',
+		},
+		{
+			url: 'https://evil.example/?page=2',
+			authorization: null,
+		},
+	]);
+});
+
+test.serial('paginate - preserves non-sensitive withHeaders defaults after a cross-origin redirect strips sensitive defaults', async t => {
+	const seenRequests = [];
+	const fetchWithHeaders = withHeaders(async (input, options) => {
+		const request = input instanceof Request ? input : new Request(input, options);
+		const page = seenRequests.length + 1;
+
+		seenRequests.push({
+			url: request.url,
+			authorization: request.headers.get('authorization'),
+			accept: request.headers.get('accept'),
+			xApiVersion: request.headers.get('x-api-version'),
+		});
+
+		return {
+			ok: true,
+			status: 200,
+			url: page === 1 ? 'https://cdn.example.net/?page=1' : request.url,
+			headers: {
+				get(name) {
+					if (name === 'Link' && page === 1) {
+						return redirectedNextPageLink;
+					}
+
+					return undefined;
+				},
+			},
+			json: async () => [page],
+		};
+	}, {
+		authorization: 'Bearer secret',
+		accept: 'application/json',
+		'x-api-version': '2026-03',
+	});
+
+	const items = await paginate.all('https://api.example.com/?page=1', {
+		fetchFunction: fetchWithHeaders,
+	});
+
+	t.deepEqual(items, [1, 2]);
+	t.deepEqual(seenRequests, [
+		{
+			url: 'https://api.example.com/?page=1',
+			authorization: 'Bearer secret',
+			accept: 'application/json',
+			xApiVersion: '2026-03',
+		},
+		{
+			url: 'https://cdn.example.net/?page=2',
+			authorization: null,
+			accept: 'application/json',
+			xApiVersion: '2026-03',
 		},
 	]);
 });
