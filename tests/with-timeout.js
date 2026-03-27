@@ -1,0 +1,58 @@
+import test from 'ava';
+import {withTimeout} from '../source/index.js';
+
+const createTimedMockFetch = delay => async (url, options = {}) => {
+	if (options.signal?.aborted) {
+		const error = new Error('The operation was aborted');
+		error.name = 'AbortError';
+		throw error;
+	}
+
+	return new Promise((resolve, reject) => {
+		const timer = setTimeout(() => {
+			resolve({
+				ok: true,
+				status: 200,
+				statusText: 'OK',
+				url,
+			});
+		}, delay);
+
+		options.signal?.addEventListener('abort', () => {
+			clearTimeout(timer);
+			const error = new Error('The operation was aborted');
+			error.name = 'AbortError';
+			reject(error);
+		});
+	});
+};
+
+test('withTimeout - should abort request after timeout', async t => {
+	const slowFetch = createTimedMockFetch(200);
+	const fetchWithTimeout = withTimeout(slowFetch, 100);
+
+	await t.throwsAsync(fetchWithTimeout('/test'), {name: 'AbortError'});
+});
+
+test('withTimeout - should respect existing abort signal', async t => {
+	const mockFetch = createTimedMockFetch(100);
+	const fetchWithTimeout = withTimeout(mockFetch, 1000);
+	const controller = new AbortController();
+
+	controller.abort();
+
+	await t.throwsAsync(fetchWithTimeout('/test', {signal: controller.signal}), {name: 'AbortError'});
+});
+
+test('withTimeout - should complete before timeout', async t => {
+	const quickFetch = createTimedMockFetch(50);
+	const fetchWithTimeout = withTimeout(quickFetch, 1000);
+
+	const response = await fetchWithTimeout('/test');
+	t.deepEqual(response, {
+		ok: true,
+		status: 200,
+		statusText: 'OK',
+		url: '/test',
+	});
+});
