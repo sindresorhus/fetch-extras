@@ -93,6 +93,8 @@ export function withTimeout(
 	timeout: number
 ): typeof fetch;
 
+export {withBaseUrl} from './with-base-url.js';
+
 /**
 Pagination options for customizing how pagination works.
 */

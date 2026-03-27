@@ -1,4 +1,5 @@
 export {paginate} from './paginate.js';
+export {withBaseUrl} from './with-base-url.js';
 
 export class HttpError extends Error {
 	constructor(response) {
