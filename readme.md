@@ -46,6 +46,8 @@ const data = await response.json();
 - [`withTimeout`](docs/with-timeout.md)
 - [`withBaseUrl`](docs/with-base-url.md)
 - [`withHeaders`](docs/with-headers.md)
+- [`withDownloadProgress`](docs/with-download-progress.md)
+- [`withUploadProgress`](docs/with-upload-progress.md)
 - [`paginate`](docs/paginate.md)
 
 ## Related

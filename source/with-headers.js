@@ -1,4 +1,8 @@
-import {blockedDefaultHeaderNamesSymbol} from './utilities.js';
+import {
+	blockedRequestBodyHeaderNames,
+	blockedDefaultHeaderNamesSymbol,
+	inheritedRequestBodyHeaderNamesSymbol,
+} from './utilities.js';
 
 /**
 Wraps a fetch function to include default headers on every request. Per-call headers take priority over the defaults.
@@ -10,6 +14,8 @@ Wraps a fetch function to include default headers on every request. Per-call hea
 export function withHeaders(fetchFunction, defaultHeaders) {
 	return async (urlOrRequest, options = {}) => {
 		const merged = new Headers(defaultHeaders);
+		const requestHeaders = urlOrRequest instanceof Request ? new Headers(urlOrRequest.headers) : undefined;
+		const callHeaders = options.headers ? new Headers(options.headers) : undefined;
 		const blockedDefaultHeaderNames = new Set([
 			...(urlOrRequest?.[blockedDefaultHeaderNamesSymbol] ?? []),
 			...(options[blockedDefaultHeaderNamesSymbol] ?? []),
@@ -20,15 +26,26 @@ export function withHeaders(fetchFunction, defaultHeaders) {
 			merged.delete(headerName);
 		}
 
-		if (urlOrRequest instanceof Request) {
-			for (const [key, value] of urlOrRequest.headers) {
+		if (requestHeaders) {
+			for (const [key, value] of requestHeaders) {
 				merged.set(key, value);
 			}
 		}
 
-		if (options.headers) {
-			for (const [key, value] of new Headers(options.headers)) {
+		if (callHeaders) {
+			for (const [key, value] of callHeaders) {
 				merged.set(key, value);
+			}
+		}
+
+		if (requestHeaders && options.body !== undefined) {
+			const inheritedHeaderNames = blockedRequestBodyHeaderNames.filter(headerName => requestHeaders.has(headerName) && !callHeaders?.has(headerName));
+
+			if (inheritedHeaderNames.length > 0) {
+				options = {
+					...options,
+					[inheritedRequestBodyHeaderNamesSymbol]: inheritedHeaderNames,
+				};
 			}
 		}
 
