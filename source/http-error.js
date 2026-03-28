@@ -1,3 +1,5 @@
+import {copyFetchMetadata} from './utilities.js';
+
 export class HttpError extends Error {
 	constructor(response) {
 		const status = `${response.status} ${response.statusText}`.trim();
@@ -25,8 +27,10 @@ export async function throwIfHttpError(responseOrPromise) {
 }
 
 export function withHttpError(fetchFunction) {
-	return async (urlOrRequest, options = {}) => {
+	const fetchWithHttpError = async (urlOrRequest, options = {}) => {
 		const response = await fetchFunction(urlOrRequest, options);
 		return throwIfHttpError(response);
 	};
+
+	return copyFetchMetadata(fetchWithHttpError, fetchFunction);
 }

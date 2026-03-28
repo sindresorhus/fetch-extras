@@ -1,6 +1,7 @@
 import {
 	blockedRequestBodyHeaderNames,
 	blockedDefaultHeaderNamesSymbol,
+	copyFetchMetadata,
 	inheritedRequestBodyHeaderNamesSymbol,
 } from './utilities.js';
 
@@ -12,7 +13,7 @@ Wraps a fetch function to include default headers on every request. Per-call hea
 @returns {typeof fetch} A wrapped fetch function that merges the default headers into every request.
 */
 export function withHeaders(fetchFunction, defaultHeaders) {
-	return async (urlOrRequest, options = {}) => {
+	const fetchWithHeaders = async (urlOrRequest, options = {}) => {
 		const merged = new Headers(defaultHeaders);
 		const requestHeaders = urlOrRequest instanceof Request ? new Headers(urlOrRequest.headers) : undefined;
 		const callHeaders = options.headers ? new Headers(options.headers) : undefined;
@@ -51,4 +52,6 @@ export function withHeaders(fetchFunction, defaultHeaders) {
 
 		return fetchFunction(urlOrRequest, {...options, headers: merged});
 	};
+
+	return copyFetchMetadata(fetchWithHeaders, fetchFunction);
 }

@@ -1,4 +1,9 @@
-import {isByteStream, trackByteProgress, trackProgress} from './utilities.js';
+import {
+	copyFetchMetadata,
+	isByteStream,
+	trackByteProgress,
+	trackProgress,
+} from './utilities.js';
 
 function isImmutableHeaders(headers) {
 	try {
@@ -80,7 +85,7 @@ function withResponseMetadata(response, trackedBody, immutableHeaders) {
 }
 
 export function withDownloadProgress(fetchFunction, {onProgress} = {}) {
-	return async (urlOrRequest, options = {}) => {
+	const fetchWithDownloadProgress = async (urlOrRequest, options = {}) => {
 		const response = await fetchFunction(urlOrRequest, options);
 
 		if (onProgress && response.body) {
@@ -92,4 +97,6 @@ export function withDownloadProgress(fetchFunction, {onProgress} = {}) {
 
 		return response;
 	};
+
+	return copyFetchMetadata(fetchWithDownloadProgress, fetchFunction);
 }

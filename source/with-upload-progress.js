@@ -1,6 +1,7 @@
 import {
 	blockedRequestBodyHeaderNames,
 	blockedDefaultHeaderNamesSymbol,
+	copyFetchMetadata,
 	inheritedRequestBodyHeaderNamesSymbol,
 	isByteStream,
 	trackByteProgress,
@@ -54,7 +55,7 @@ function markBlockedDefaultHeaders(object, headerNames) {
 }
 
 export function withUploadProgress(fetchFunction, {onProgress} = {}) {
-	return async (urlOrRequest, options = {}) => {
+	const fetchWithUploadProgress = async (urlOrRequest, options = {}) => {
 		if (onProgress) {
 			const {body} = options;
 
@@ -80,4 +81,6 @@ export function withUploadProgress(fetchFunction, {onProgress} = {}) {
 
 		return fetchFunction(urlOrRequest, options);
 	};
+
+	return copyFetchMetadata(fetchWithUploadProgress, fetchFunction);
 }

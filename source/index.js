@@ -4,4 +4,5 @@ export {withBaseUrl} from './with-base-url.js';
 export {withHeaders} from './with-headers.js';
 export {withDownloadProgress} from './with-download-progress.js';
 export {withUploadProgress} from './with-upload-progress.js';
+export {withTokenRefresh} from './with-token-refresh.js';
 export {paginate} from './paginate.js';

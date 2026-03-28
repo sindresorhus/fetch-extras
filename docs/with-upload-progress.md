@@ -4,6 +4,8 @@ Wraps a fetch function with upload progress tracking.
 
 Upload progress is best-effort and only supported when the effective request body is an explicit `ReadableStream` provided in `init.body`. Other body types are passed through unchanged so `fetch` keeps its native body handling and content-type inference. Streaming request bodies still require support for `duplex: 'half'` in the runtime.
 
+When composing with `withTokenRefresh()`, place `withUploadProgress()` inside `withTokenRefresh()` if you want progress for both the initial send and the retry. If `withUploadProgress()` wraps `withTokenRefresh()`, it only observes the first call into `withTokenRefresh()`.
+
 ## Parameters
 
 - `fetchFunction` (`typeof fetch`) - The fetch function to wrap (usually the global `fetch`).

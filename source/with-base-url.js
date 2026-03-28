@@ -1,3 +1,5 @@
+import {copyFetchMetadata} from './utilities.js';
+
 /**
 Wraps a fetch function to resolve relative URLs against a base URL. Only string-based relative URLs are resolved; absolute URLs and URL objects are passed through unchanged.
 
@@ -9,7 +11,7 @@ export function withBaseUrl(fetchFunction, baseUrl) {
 	const baseUrlString = baseUrl instanceof URL ? baseUrl.href : baseUrl;
 	let baseUrlObject;
 
-	return async (urlOrRequest, options = {}) => {
+	const fetchWithBaseUrl = async (urlOrRequest, options = {}) => {
 		if (typeof urlOrRequest !== 'string') {
 			return fetchFunction(urlOrRequest, options);
 		}
@@ -44,4 +46,6 @@ export function withBaseUrl(fetchFunction, baseUrl) {
 
 		return fetchFunction(new URL(urlOrRequest.replace(/^\/+/, ''), baseUrlForPath).href, options);
 	};
+
+	return copyFetchMetadata(fetchWithBaseUrl, fetchFunction);
 }
