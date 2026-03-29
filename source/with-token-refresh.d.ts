@@ -14,8 +14,10 @@ Concurrent 401 responses that overlap while a refresh is still pending share a s
 Can be combined with other `with*` functions. Should be composed inside `withHttpError` so it can see the raw 401 response:
 
 ```
-const apiFetch = withHttpError(
-	withTokenRefresh(fetch, {refreshToken: ...}),
+const apiFetch = pipeline(
+	fetch,
+	f => withTokenRefresh(f, {refreshToken: ...}),
+	withHttpError,
 );
 ```
 
@@ -41,19 +43,19 @@ const data = await response.json();
 
 @example
 ```
-import {withHttpError, withTokenRefresh, withBaseUrl} from 'fetch-extras';
+import {pipeline, withHttpError, withTokenRefresh, withBaseUrl} from 'fetch-extras';
 
-const apiFetch = withHttpError(
-	withTokenRefresh(
-		withBaseUrl(fetch, 'https://api.example.com'),
-		{
-			refreshToken: async () => {
-				const response = await fetch('/auth/refresh', {method: 'POST'});
-				const {accessToken} = await response.json();
-				return accessToken;
-			},
+const apiFetch = pipeline(
+	fetch,
+	f => withBaseUrl(f, 'https://api.example.com'),
+	f => withTokenRefresh(f, {
+		refreshToken: async () => {
+			const response = await fetch('/auth/refresh', {method: 'POST'});
+			const {accessToken} = await response.json();
+			return accessToken;
 		},
-	),
+	}),
+	withHttpError,
 );
 
 const response = await apiFetch('/users');

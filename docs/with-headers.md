@@ -33,14 +33,13 @@ const response2 = await fetchWithAuth('/api/upload', {
 Can be combined with other `with*` functions:
 
 ```js
-import {withHeaders, withBaseUrl, withTimeout} from 'fetch-extras';
+import {pipeline, withHeaders, withBaseUrl, withTimeout} from 'fetch-extras';
 
-const apiFetch = withHeaders(
-	withBaseUrl(
-		withTimeout(fetch, 5000),
-		'https://api.example.com'
-	),
-	{Authorization: 'Bearer my-token'},
+const apiFetch = pipeline(
+	fetch,
+	f => withTimeout(f, 5000),
+	f => withBaseUrl(f, 'https://api.example.com'),
+	f => withHeaders(f, {Authorization: 'Bearer my-token'}),
 );
 
 const response = await apiFetch('/users');

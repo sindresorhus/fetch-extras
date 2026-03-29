@@ -6,3 +6,4 @@ export {withDownloadProgress, type Progress} from './with-download-progress.js';
 export {withUploadProgress} from './with-upload-progress.js';
 export {withTokenRefresh} from './with-token-refresh.js';
 export * from './paginate.js';
+export {pipeline} from './pipeline.js';

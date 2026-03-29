@@ -27,13 +27,13 @@ await fetch1('?page=2'); // https://api.example.com/v1?page=2
 Can be combined with other `with*` functions:
 
 ```js
-import {withBaseUrl, withHttpError, withTimeout} from 'fetch-extras';
+import {pipeline, withBaseUrl, withHttpError, withTimeout} from 'fetch-extras';
 
-const fetchWithAll = withHttpError(
-	withBaseUrl(
-		withTimeout(fetch, 5000),
-		'https://api.example.com'
-	)
+const fetchWithAll = pipeline(
+	fetch,
+	f => withTimeout(f, 5000),
+	f => withBaseUrl(f, 'https://api.example.com'),
+	withHttpError,
 );
 
 const response = await fetchWithAll('/users');

@@ -17,21 +17,19 @@ npm install fetch-extras
 ## Usage
 
 ```js
-import {withHttpError, withTimeout, withBaseUrl, withHeaders} from 'fetch-extras';
+import {pipeline, withHttpError, withTimeout, withBaseUrl, withHeaders} from 'fetch-extras';
 
 // Create a tiny reusable API client that:
 // - Sends auth headers on every request
 // - Uses a base URL so you only write paths
 // - Throws errors for non-2xx responses
 // - Times out after 5 seconds
-const apiFetch = withHeaders(
-	withHttpError(
-		withBaseUrl(
-			withTimeout(fetch, 5000),
-			'https://api.example.com',
-		),
-	),
-	{Authorization: 'Bearer my-token'},
+const apiFetch = pipeline(
+	fetch,
+	f => withTimeout(f, 5000),
+	f => withBaseUrl(f, 'https://api.example.com'),
+	f => withHeaders(f, {Authorization: 'Bearer token'}),
+	withHttpError,
 );
 
 const response = await apiFetch('/users');
@@ -50,6 +48,7 @@ const data = await response.json();
 - [`withUploadProgress`](docs/with-upload-progress.md)
 - [`withTokenRefresh`](docs/with-token-refresh.md)
 - [`paginate`](docs/paginate.md)
+- [`pipeline`](docs/pipeline.md)
 
 ## Related
 

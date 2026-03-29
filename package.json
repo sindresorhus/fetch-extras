@@ -20,7 +20,7 @@
 		"node": ">=18.18"
 	},
 	"scripts": {
-		"test": "xo && ava && tsc source/index.d.ts"
+		"test": "xo && ava && tsc source/index.d.ts && tsc --noEmit --module node16 --moduleResolution node16 --target es2022 test-d.ts"
 	},
 	"files": [
 		"source"

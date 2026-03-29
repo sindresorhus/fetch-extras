@@ -26,8 +26,13 @@ const data = await response.json();
 Can be combined with other `with*` functions:
 
 ```js
-import {withHttpError, withTimeout} from 'fetch-extras';
+import {pipeline, withHttpError, withTimeout} from 'fetch-extras';
 
-const fetchWithAll = withHttpError(withTimeout(fetch, 5000));
+const fetchWithAll = pipeline(
+	fetch,
+	f => withTimeout(f, 5000),
+	withHttpError,
+);
+
 const response = await fetchWithAll('/api');
 ```
