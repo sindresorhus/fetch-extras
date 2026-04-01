@@ -3,6 +3,7 @@ import {
 	withBaseUrl,
 	withHeaders,
 	withHttpError,
+	withRateLimit,
 	withTimeout,
 } from './source/index.js';
 
@@ -54,7 +55,11 @@ const apiFetch = pipeline(
 
 const responsePromise: Promise<Response> = apiFetch('/users');
 
+const rateLimitedFetch = withRateLimit(fetch, {requestsPerInterval: 10, interval: 1000});
+const rateLimitedResponse: Promise<Response> = rateLimitedFetch('/api');
+
 void result;
 void inferredResult;
 void longPipelineResult;
 void responsePromise;
+void rateLimitedResponse;

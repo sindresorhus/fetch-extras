@@ -47,6 +47,7 @@ const data = await response.json();
 - [`withDownloadProgress`](docs/with-download-progress.md)
 - [`withUploadProgress`](docs/with-upload-progress.md)
 - [`withTokenRefresh`](docs/with-token-refresh.md)
+- [`withRateLimit`](docs/with-rate-limit.md)
 - [`paginate`](docs/paginate.md)
 - [`pipeline`](docs/pipeline.md)
 
