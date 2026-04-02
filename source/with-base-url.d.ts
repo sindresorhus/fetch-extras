@@ -16,7 +16,10 @@ import {withBaseUrl} from 'fetch-extras';
 const fetchWithBaseUrl = withBaseUrl(fetch, 'https://api.example.com');
 const response = await fetchWithBaseUrl('/users'); // Requests https://api.example.com/users
 const data = await response.json();
+```
 
+@example
+```
 // Both of these work the same way
 const fetch1 = withBaseUrl(fetch, 'https://api.example.com/v1');
 const fetch2 = withBaseUrl(fetch, 'https://api.example.com/v1/');

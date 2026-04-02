@@ -104,6 +104,28 @@ test('withBaseUrl - passes through Request objects unchanged', async t => {
 	t.is(response.url, 'https://other.example.com/endpoint');
 });
 
+test('withBaseUrl - preserves Request method and headers', async t => {
+	let receivedMethod;
+	let receivedHeaders;
+	const mockFetch_ = async request => {
+		receivedMethod = request.method;
+		receivedHeaders = request.headers;
+		return new Response('ok');
+	};
+
+	const fetchWithBaseUrl = withBaseUrl(mockFetch_, 'https://api.example.com');
+	const request = new Request('https://other.example.com/endpoint', {
+		method: 'POST',
+		headers: {Authorization: 'Bearer token'},
+		body: 'body',
+	});
+
+	await fetchWithBaseUrl(request);
+
+	t.is(receivedMethod, 'POST');
+	t.is(receivedHeaders.get('authorization'), 'Bearer token');
+});
+
 test('withBaseUrl - does not validate base URL when input is not a string', async t => {
 	const fetchWithBaseUrl = withBaseUrl(mockFetch, 'not a valid url');
 	const url = new URL('https://example.com/users');

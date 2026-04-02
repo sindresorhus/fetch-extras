@@ -1,4 +1,4 @@
-import {copyFetchMetadata} from './utilities.js';
+import {copyFetchMetadata, resolveRequestUrlSymbol} from './utilities.js';
 
 /**
 Wraps a fetch function to resolve relative URLs against a base URL. Only string-based relative URLs are resolved; absolute URLs and URL objects are passed through unchanged.
@@ -11,11 +11,7 @@ export function withBaseUrl(fetchFunction, baseUrl) {
 	const baseUrlString = baseUrl instanceof URL ? baseUrl.href : baseUrl;
 	let baseUrlObject;
 
-	const fetchWithBaseUrl = async (urlOrRequest, options = {}) => {
-		if (typeof urlOrRequest !== 'string') {
-			return fetchFunction(urlOrRequest, options);
-		}
-
+	const getBaseUrlObject = () => {
 		if (!baseUrlObject) {
 			try {
 				baseUrlObject = new URL(baseUrlString);
@@ -24,19 +20,27 @@ export function withBaseUrl(fetchFunction, baseUrl) {
 			}
 		}
 
+		return baseUrlObject;
+	};
+
+	const resolveRequestUrl = urlOrRequest => {
+		if (typeof urlOrRequest !== 'string') {
+			return urlOrRequest instanceof Request ? urlOrRequest.url : String(urlOrRequest);
+		}
+
 		if (/^[a-z][a-z\d+\-.]*:/i.test(urlOrRequest)) {
-			return fetchFunction(urlOrRequest, options);
+			return urlOrRequest;
 		}
 
 		if (urlOrRequest === '') {
-			return fetchFunction(baseUrlString, options);
+			return baseUrlString;
 		}
 
 		if (/^\/\/[^/]/.test(urlOrRequest) || /^[?#]/.test(urlOrRequest)) {
-			return fetchFunction(new URL(urlOrRequest, baseUrlObject).href, options);
+			return new URL(urlOrRequest, getBaseUrlObject()).href;
 		}
 
-		const baseUrlForPath = new URL(baseUrlObject);
+		const baseUrlForPath = new URL(getBaseUrlObject());
 		baseUrlForPath.search = '';
 		baseUrlForPath.hash = '';
 
@@ -44,8 +48,15 @@ export function withBaseUrl(fetchFunction, baseUrl) {
 			baseUrlForPath.pathname = `${baseUrlForPath.pathname}/`;
 		}
 
-		return fetchFunction(new URL(urlOrRequest.replace(/^\/+/, ''), baseUrlForPath).href, options);
+		return new URL(urlOrRequest.replace(/^\/+/, ''), baseUrlForPath).href;
 	};
+
+	const fetchWithBaseUrl = async (urlOrRequest, options = {}) => fetchFunction(
+		typeof urlOrRequest === 'string' ? resolveRequestUrl(urlOrRequest) : urlOrRequest,
+		options,
+	);
+
+	fetchWithBaseUrl[resolveRequestUrlSymbol] = resolveRequestUrl;
 
 	return copyFetchMetadata(fetchWithBaseUrl, fetchFunction);
 }

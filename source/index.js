@@ -6,5 +6,6 @@ export {withDownloadProgress} from './with-download-progress.js';
 export {withUploadProgress} from './with-upload-progress.js';
 export {withTokenRefresh} from './with-token-refresh.js';
 export {withRateLimit} from './with-rate-limit.js';
+export {withCache} from './with-cache.js';
 export {paginate} from './paginate.js';
 export {pipeline} from './pipeline.js';

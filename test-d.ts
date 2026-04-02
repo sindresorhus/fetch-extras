@@ -1,6 +1,7 @@
 import {
 	pipeline,
 	withBaseUrl,
+	withCache,
 	withHeaders,
 	withHttpError,
 	withRateLimit,
@@ -58,8 +59,12 @@ const responsePromise: Promise<Response> = apiFetch('/users');
 const rateLimitedFetch = withRateLimit(fetch, {requestsPerInterval: 10, interval: 1000});
 const rateLimitedResponse: Promise<Response> = rateLimitedFetch('/api');
 
+const cachedFetch = withCache(fetch, {ttl: 60_000});
+const cachedResponse: Promise<Response> = cachedFetch('/api');
+
 void result;
 void inferredResult;
 void longPipelineResult;
 void responsePromise;
 void rateLimitedResponse;
+void cachedResponse;

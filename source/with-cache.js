@@ -1,0 +1,171 @@
+import {copyFetchMetadata, resolveRequestUrlSymbol} from './utilities.js';
+
+const nonInvalidatingMethods = new Set(['HEAD', 'OPTIONS', 'TRACE']);
+
+function getCacheKey(urlOrRequest) {
+	const url = urlOrRequest instanceof Request
+		? urlOrRequest.url
+		: String(urlOrRequest);
+
+	return url.split('#', 1)[0];
+}
+
+function getResolvedCacheKey(fetchFunction, urlOrRequest) {
+	const resolvedUrl = fetchFunction[resolveRequestUrlSymbol]?.(urlOrRequest) ?? urlOrRequest;
+	return getCacheKey(resolvedUrl);
+}
+
+function getHeaders(urlOrRequest, options) {
+	return new Headers(options.headers ?? (urlOrRequest instanceof Request ? urlOrRequest.headers : undefined));
+}
+
+function getRequestContext(fetchFunction, urlOrRequest, options) {
+	return {
+		method: (options.method ?? (urlOrRequest instanceof Request ? urlOrRequest.method : 'GET')).toUpperCase(),
+		url: getResolvedCacheKey(fetchFunction, urlOrRequest),
+		cacheMode: options.cache ?? (urlOrRequest instanceof Request ? urlOrRequest.cache : undefined),
+		signal: options.signal ?? (urlOrRequest instanceof Request ? urlOrRequest.signal : undefined),
+		isRangedRequest: getHeaders(urlOrRequest, options).has('range'),
+	};
+}
+
+function getGeneration(cache, state, url) {
+	return cache.get(url)?.generation ?? state.get(url)?.generation ?? 0;
+}
+
+function getState(state, url) {
+	let urlState = state.get(url);
+
+	if (!urlState) {
+		urlState = {
+			generation: 0,
+			pendingGetCount: 0,
+			pendingInvalidationCount: 0,
+		};
+		state.set(url, urlState);
+	}
+
+	return urlState;
+}
+
+function cleanupState(cache, state, url) {
+	const urlState = state.get(url);
+
+	if (
+		urlState
+		&& !cache.has(url)
+		&& urlState.pendingGetCount === 0
+		&& urlState.pendingInvalidationCount === 0
+	) {
+		state.delete(url);
+	}
+}
+
+async function trackPending(resources, url, counterName, callback) {
+	const urlState = getState(resources.state, url);
+	urlState[counterName]++;
+
+	try {
+		return await callback(urlState);
+	} finally {
+		urlState[counterName]--;
+		cleanupState(resources.cache, resources.state, url);
+	}
+}
+
+function evictExpiredEntries(cache, state, retainKey) {
+	const currentTime = performance.now();
+
+	for (const [key, entry] of cache) {
+		if (entry.expiry <= currentTime && (key !== retainKey || !entry.response)) {
+			cache.delete(key);
+			cleanupState(cache, state, key);
+		}
+	}
+
+	return currentTime;
+}
+
+function getCachedResponse(entry, cacheMode, currentTime, isRangedRequest) {
+	if (!entry?.response || isRangedRequest || cacheMode === 'no-store') {
+		return;
+	}
+
+	if (cacheMode === 'only-if-cached' || cacheMode === 'force-cache') {
+		return entry.response.clone();
+	}
+
+	if (cacheMode !== 'reload' && cacheMode !== 'no-cache' && currentTime < entry.expiry) {
+		return entry.response.clone();
+	}
+}
+
+export function withCache(fetchFunction, {ttl}) {
+	if (typeof ttl !== 'number' || ttl <= 0 || !Number.isFinite(ttl)) {
+		throw new TypeError('`ttl` must be a positive finite number.');
+	}
+
+	const cache = new Map();
+	const state = new Map();
+	const resources = {cache, state};
+
+	const fetchWithCache = async (urlOrRequest, options = {}) => {
+		const {method, url, cacheMode, signal, isRangedRequest} = getRequestContext(fetchFunction, urlOrRequest, options);
+		const retainStaleEntry = cacheMode === 'force-cache' || cacheMode === 'only-if-cached';
+		const currentTime = evictExpiredEntries(cache, state, retainStaleEntry ? url : undefined);
+
+		// Non-GET requests pass through; unsafe methods also invalidate cache
+		if (method !== 'GET') {
+			if (nonInvalidatingMethods.has(method)) {
+				return fetchFunction(urlOrRequest, options);
+			}
+
+			signal?.throwIfAborted();
+
+			const generation = getGeneration(cache, state, url);
+			cache.delete(url);
+
+			return trackPending(resources, url, 'pendingInvalidationCount', async urlState => {
+				urlState.generation = generation + 1;
+				return fetchFunction(urlOrRequest, options);
+			});
+		}
+
+		signal?.throwIfAborted();
+
+		const entry = cache.get(url);
+		const cachedResponse = getCachedResponse(entry, cacheMode, currentTime, isRangedRequest);
+		if (cachedResponse) {
+			return cachedResponse;
+		}
+
+		if (cacheMode === 'only-if-cached') {
+			return new Response(undefined, {status: 504, statusText: 'Gateway Timeout'});
+		}
+
+		const generation = getGeneration(cache, state, url);
+		return trackPending(resources, url, 'pendingGetCount', async () => {
+			const response = await fetchFunction(urlOrRequest, options);
+			const isPartialResponse = response.status === 206;
+
+			// Only cache successful responses.
+			if (
+				response.ok
+				&& !isRangedRequest
+				&& !isPartialResponse
+				&& cacheMode !== 'no-store'
+				&& generation === getGeneration(cache, state, url)
+			) {
+				cache.set(url, {
+					generation,
+					response: response.clone(),
+					expiry: performance.now() + ttl,
+				});
+			}
+
+			return response;
+		});
+	};
+
+	return copyFetchMetadata(fetchWithCache, fetchFunction);
+}

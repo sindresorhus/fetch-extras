@@ -1,6 +1,7 @@
 export const blockedDefaultHeaderNamesSymbol = Symbol('blockedDefaultHeaderNames');
 export const inheritedRequestBodyHeaderNamesSymbol = Symbol('inheritedRequestBodyHeaderNames');
 export const timeoutDurationSymbol = Symbol('timeoutDuration');
+export const resolveRequestUrlSymbol = Symbol('resolveRequestUrl');
 export const requestBodyHeaderNames = [
 	'content-encoding',
 	'content-language',
@@ -144,11 +145,15 @@ export function delay(milliseconds, {signal} = {}) {
 export function copyFetchMetadata(targetFetch, sourceFetch) {
 	/*
 	Boundary: this only forwards metadata that outer wrappers need to preserve their documented behavior.
-	Right now that is just timeoutDurationSymbol so withTokenRefresh can still see an inner withTimeout through simple wrapper chains.
+	Right now that is timeoutDurationSymbol and resolveRequestUrlSymbol so wrappers can preserve timeout behavior and URL-based composition semantics through simple wrapper chains.
 	Do not expand this into a generic wrapper-introspection channel.
 	*/
 	if (sourceFetch[timeoutDurationSymbol] !== undefined) {
 		targetFetch[timeoutDurationSymbol] = sourceFetch[timeoutDurationSymbol];
+	}
+
+	if (targetFetch[resolveRequestUrlSymbol] === undefined && sourceFetch[resolveRequestUrlSymbol] !== undefined) {
+		targetFetch[resolveRequestUrlSymbol] = sourceFetch[resolveRequestUrlSymbol];
 	}
 
 	return targetFetch;
