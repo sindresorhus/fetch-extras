@@ -49,6 +49,7 @@ const data = await response.json();
 - [`withTokenRefresh`](docs/with-token-refresh.md)
 - [`withRateLimit`](docs/with-rate-limit.md)
 - [`withCache`](docs/with-cache.md)
+- [`withDeduplication`](docs/with-deduplication.md)
 - [`paginate`](docs/paginate.md)
 - [`pipeline`](docs/pipeline.md)
 

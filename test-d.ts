@@ -2,6 +2,7 @@ import {
 	pipeline,
 	withBaseUrl,
 	withCache,
+	withDeduplication,
 	withHeaders,
 	withHttpError,
 	withRateLimit,
@@ -67,4 +68,8 @@ void inferredResult;
 void longPipelineResult;
 void responsePromise;
 void rateLimitedResponse;
+const deduplicatedFetch = withDeduplication(fetch);
+const deduplicatedResponse: Promise<Response> = deduplicatedFetch('/api');
+
 void cachedResponse;
+void deduplicatedResponse;

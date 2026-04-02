@@ -142,6 +142,15 @@ export function delay(milliseconds, {signal} = {}) {
 	});
 }
 
+export function resolveRequestUrl(fetchFunction, urlOrRequest) {
+	const resolvedUrl = fetchFunction[resolveRequestUrlSymbol]?.(urlOrRequest) ?? urlOrRequest;
+	const url = resolvedUrl instanceof Request
+		? resolvedUrl.url
+		: String(resolvedUrl);
+
+	return url.split('#', 1)[0];
+}
+
 export function copyFetchMetadata(targetFetch, sourceFetch) {
 	/*
 	Boundary: this only forwards metadata that outer wrappers need to preserve their documented behavior.
