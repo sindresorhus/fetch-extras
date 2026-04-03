@@ -3,7 +3,7 @@ import {copyFetchMetadata, resolveRequestUrlSymbol} from './utilities.js';
 /**
 Wraps a fetch function to resolve relative URLs against a base URL. Only string-based relative URLs are resolved; absolute URLs and URL objects are passed through unchanged.
 
-@param {typeof fetch} fetchFunction - The fetch function to wrap.
+@param {typeof fetch} fetchFunction - The fetch function to wrap (usually the global `fetch`).
 @param {URL | string} baseUrl - The base URL to resolve relative URLs against.
 @returns {typeof fetch} A wrapped fetch function that resolves relative URLs against the base URL.
 */

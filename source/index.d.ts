@@ -8,5 +8,6 @@ export {withTokenRefresh} from './with-token-refresh.js';
 export {withRateLimit} from './with-rate-limit.js';
 export {withCache} from './with-cache.js';
 export {withDeduplication} from './with-deduplication.js';
+export {withRetry} from './with-retry.js';
 export * from './paginate.js';
 export {pipeline} from './pipeline.js';

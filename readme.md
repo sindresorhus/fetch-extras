@@ -17,13 +17,19 @@ npm install fetch-extras
 ## Usage
 
 ```js
-import {pipeline, withHttpError, withTimeout, withBaseUrl, withHeaders} from 'fetch-extras';
+import {
+	pipeline,
+	withTimeout,
+	withBaseUrl,
+	withHeaders,
+	withHttpError
+} from 'fetch-extras';
 
 // Create a tiny reusable API client that:
-// - Sends auth headers on every request
-// - Uses a base URL so you only write paths
-// - Throws errors for non-2xx responses
 // - Times out after 5 seconds
+// - Uses a base URL so you only write paths
+// - Sends auth headers on every request
+// - Throws errors for non-2xx responses
 const apiFetch = pipeline(
 	fetch,
 	f => withTimeout(f, 5000),
@@ -38,18 +44,21 @@ const data = await response.json();
 
 ## API
 
-- [`HttpError`](docs/http-error.md#httperror)
-- [`throwIfHttpError`](docs/http-error.md#throwifhttperrorresponse)
-- [`withHttpError`](docs/http-error.md#withhttperrorfetchfunction)
+The `with*` functions are listed in the recommended wrapping order for use with [`pipeline`](docs/pipeline.md).
+
 - [`withTimeout`](docs/with-timeout.md)
 - [`withBaseUrl`](docs/with-base-url.md)
 - [`withHeaders`](docs/with-headers.md)
+- [`withRateLimit`](docs/with-rate-limit.md)
+- [`withDeduplication`](docs/with-deduplication.md)
+- [`withCache`](docs/with-cache.md)
 - [`withDownloadProgress`](docs/with-download-progress.md)
 - [`withUploadProgress`](docs/with-upload-progress.md)
+- [`withRetry`](docs/with-retry.md)
 - [`withTokenRefresh`](docs/with-token-refresh.md)
-- [`withRateLimit`](docs/with-rate-limit.md)
-- [`withCache`](docs/with-cache.md)
-- [`withDeduplication`](docs/with-deduplication.md)
+- [`withHttpError`](docs/http-error.md#withhttperrorfetchfunction)
+- [`HttpError`](docs/http-error.md#httperror)
+- [`throwIfHttpError`](docs/http-error.md#throwifhttperrorresponse)
 - [`paginate`](docs/paginate.md)
 - [`pipeline`](docs/pipeline.md)
 

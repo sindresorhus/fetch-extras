@@ -3,7 +3,7 @@ import {blockedRequestBodyHeaderNames, copyFetchMetadata, timeoutDurationSymbol}
 /**
 Wraps a fetch function to automatically refresh the token and retry the request on a `401 Unauthorized` response.
 
-@param {typeof fetch} fetchFunction - The fetch function to wrap.
+@param {typeof fetch} fetchFunction - The fetch function to wrap (usually the global `fetch`).
 @param {object} options
 @param {() => Promise<string>} options.refreshToken - Called when a 401 response is received. Should return the new token string.
 @returns {typeof fetch} A wrapped fetch function that retries once with a refreshed `Authorization: Bearer <token>` header on 401 responses.

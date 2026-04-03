@@ -8,7 +8,7 @@ import {
 /**
 Wraps a fetch function to include default headers on every request. Per-call headers take priority over the defaults.
 
-@param {typeof fetch} fetchFunction - The fetch function to wrap.
+@param {typeof fetch} fetchFunction - The fetch function to wrap (usually the global `fetch`).
 @param {HeadersInit} defaultHeaders - Default headers to include on every request.
 @returns {typeof fetch} A wrapped fetch function that merges the default headers into every request.
 */

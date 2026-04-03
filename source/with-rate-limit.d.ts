@@ -31,8 +31,8 @@ import {pipeline, withHttpError, withRateLimit, withBaseUrl} from 'fetch-extras'
 
 const apiFetch = pipeline(
 	fetch,
-	f => withRateLimit(f, {requestsPerInterval: 10, interval: 1000}),
 	f => withBaseUrl(f, 'https://api.example.com'),
+	f => withRateLimit(f, {requestsPerInterval: 10, interval: 1000}),
 	withHttpError,
 );
 
