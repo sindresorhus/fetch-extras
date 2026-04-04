@@ -6,6 +6,7 @@ import {
 	withHeaders,
 	withHttpError,
 	withRateLimit,
+	withSearchParameters,
 	withTimeout,
 } from './source/index.js';
 
@@ -62,6 +63,9 @@ const rateLimitedResponse: Promise<Response> = rateLimitedFetch('/api');
 
 const cachedFetch = withCache(fetch, {ttl: 60_000});
 const cachedResponse: Promise<Response> = cachedFetch('/api');
+const readonlySearchParameters = [['apiKey', 'token']] as const;
+const fetchWithReadonlySearchParameters = withSearchParameters(fetch, readonlySearchParameters);
+const readonlySearchParametersResponse: Promise<Response> = fetchWithReadonlySearchParameters('/api');
 
 void result;
 void inferredResult;
@@ -73,3 +77,4 @@ const deduplicatedResponse: Promise<Response> = deduplicatedFetch('/api');
 
 void cachedResponse;
 void deduplicatedResponse;
+void readonlySearchParametersResponse;

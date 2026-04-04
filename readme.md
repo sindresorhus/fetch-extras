@@ -48,6 +48,7 @@ The `with*` functions are listed in the recommended wrapping order for use with 
 
 - [`withTimeout`](docs/with-timeout.md)
 - [`withBaseUrl`](docs/with-base-url.md)
+- [`withSearchParameters`](docs/with-search-parameters.md)
 - [`withHeaders`](docs/with-headers.md)
 - [`withRateLimit`](docs/with-rate-limit.md)
 - [`withDeduplication`](docs/with-deduplication.md)

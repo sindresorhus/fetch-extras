@@ -4,6 +4,7 @@ import {
 	withBaseUrl,
 	withCache,
 	withHeaders,
+	withSearchParameters,
 } from '../source/index.js';
 import {blockedDefaultHeaderNamesSymbol, timeoutDurationSymbol} from '../source/utilities.js';
 
@@ -611,6 +612,20 @@ test('withBaseUrl composition shares a cache entry with the equivalent absolute 
 
 	await cachedFetch('/users');
 	await cachedFetch(new Request('https://api.example.com/v1/users'));
+
+	t.is(mockFetch.callCount, 1);
+});
+
+test('withSearchParameters composition shares a cache entry across equivalent absolute URL spellings', async t => {
+	const mockFetch = createMockFetch();
+	const cachedFetch = pipeline(
+		mockFetch,
+		fetchFunction => withSearchParameters(fetchFunction, {apiKey: 'abc'}),
+		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+	);
+
+	await cachedFetch('https://example.com');
+	await cachedFetch(new URL('https://example.com/?apiKey=abc'));
 
 	t.is(mockFetch.callCount, 1);
 });

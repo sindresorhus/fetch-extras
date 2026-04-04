@@ -1,6 +1,7 @@
 export {HttpError, throwIfHttpError, withHttpError} from './http-error.js';
 export {withTimeout} from './with-timeout.js';
 export {withBaseUrl} from './with-base-url.js';
+export {withSearchParameters} from './with-search-parameters.js';
 export {withHeaders} from './with-headers.js';
 export {withDownloadProgress, type Progress} from './with-download-progress.js';
 export {withUploadProgress} from './with-upload-progress.js';
