@@ -41,6 +41,29 @@ const createResponse = (status, headers = {}) =>
 
 const networkError = () => new TypeError('fetch failed');
 
+const createBodyOverrideRequest = (headers, body = 'original-body') => new Request('https://example.com/api', {
+	method: 'PUT',
+	body,
+	headers,
+});
+
+const createFormDataBody = () => {
+	const formData = new FormData();
+	formData.append('field', 'value');
+	return formData;
+};
+
+const createRecordedResponseFetch = ({initialStatus = 503, retryStatus = 200, onRequest}) => {
+	let callCount = 0;
+
+	return async (urlOrRequest, options = {}) => {
+		callCount++;
+		onRequest?.(new Request(urlOrRequest, options), callCount);
+
+		return new Response(null, {status: callCount === 1 ? initialStatus : retryStatus});
+	};
+};
+
 test('succeeds on first attempt without retry', async t => {
 	const mockFetch = createMockFetch([createResponse(200)]);
 	const fetchWithRetry = withRetry(mockFetch);
@@ -551,103 +574,299 @@ test('preserves withUploadProgress when wrapping streamed uploads', async t => {
 	});
 });
 
-test('Request body overrides strip inherited body headers when retrying', async t => {
-	let callCount = 0;
+test('Request body overrides preserve explicit Request body headers across retry', async t => {
 	const contentTypes = [];
 	const contentLengths = [];
-	const mockFetch = async (urlOrRequest, options = {}) => {
-		callCount++;
-		const request = new Request(urlOrRequest, options);
-		contentTypes.push(request.headers.get('content-type'));
-		contentLengths.push(request.headers.get('content-length'));
-
-		return new Response(null, {status: callCount === 1 ? 503 : 200});
-	};
+	const mockFetch = createRecordedResponseFetch({
+		onRequest(request) {
+			contentTypes.push(request.headers.get('content-type'));
+			contentLengths.push(request.headers.get('content-length'));
+		},
+	});
 
 	const fetchWithRetry = withRetry(mockFetch, {backoff: () => 0});
-	const formData = new FormData();
-	formData.append('field', 'value');
-	const request = new Request('https://example.com/api', {
-		method: 'PUT',
-		body: 'original-body',
-		headers: {
-			'content-type': 'text/plain;charset=UTF-8',
-			'content-length': '999',
-		},
+	const formData = createFormDataBody();
+	const request = createBodyOverrideRequest({
+		'content-type': 'text/plain;charset=UTF-8',
+		'content-length': '999',
 	});
 
 	const response = await fetchWithRetry(request, {body: formData});
 	t.is(response.status, 200);
-	t.true(contentTypes[0].startsWith('multipart/form-data; boundary='));
-	t.true(contentTypes[1].startsWith('multipart/form-data; boundary='));
-	t.is(contentLengths[0], null);
-	t.is(contentLengths[1], null);
+	t.deepEqual(contentTypes, ['text/plain;charset=UTF-8', 'text/plain;charset=UTF-8']);
+	t.deepEqual(contentLengths, ['999', '999']);
 });
 
-test('Request body overrides strip inherited body headers when retried through inner withHeaders', async t => {
-	let callCount = 0;
+test('Request body overrides preserve explicit Request body headers across retry through inner withHeaders', async t => {
 	const contentTypes = [];
 	const contentLengths = [];
-	const mockFetch = async (urlOrRequest, options = {}) => {
-		callCount++;
-		const request = new Request(urlOrRequest, options);
-		contentTypes.push(request.headers.get('content-type'));
-		contentLengths.push(request.headers.get('content-length'));
-
-		return new Response(null, {status: callCount === 1 ? 503 : 200});
-	};
+	const mockFetch = createRecordedResponseFetch({
+		onRequest(request) {
+			contentTypes.push(request.headers.get('content-type'));
+			contentLengths.push(request.headers.get('content-length'));
+		},
+	});
 
 	const fetchWithRetry = withRetry(withHeaders(mockFetch, {'x-default': 'value'}), {backoff: () => 0});
-	const formData = new FormData();
-	formData.append('field', 'value');
-	const request = new Request('https://example.com/api', {
-		method: 'PUT',
-		body: 'original-body',
-		headers: {
-			'content-type': 'text/plain;charset=UTF-8',
-			'content-length': '999',
-		},
+	const formData = createFormDataBody();
+	const request = createBodyOverrideRequest({
+		'content-type': 'text/plain;charset=UTF-8',
+		'content-length': '999',
 	});
 
 	const response = await fetchWithRetry(request, {body: formData});
 	t.is(response.status, 200);
-	t.true(contentTypes[0].startsWith('multipart/form-data; boundary='));
-	t.true(contentTypes[1].startsWith('multipart/form-data; boundary='));
-	t.is(contentLengths[0], null);
-	t.is(contentLengths[1], null);
+	t.deepEqual(contentTypes, ['text/plain;charset=UTF-8', 'text/plain;charset=UTF-8']);
+	t.deepEqual(contentLengths, ['999', '999']);
 });
 
-test('Request body overrides strip inherited body headers when retried through outer withHeaders', async t => {
-	let callCount = 0;
+test('Request body overrides preserve explicit Request body headers across retry through outer withHeaders', async t => {
 	const contentTypes = [];
 	const contentLengths = [];
-	const mockFetch = async (urlOrRequest, options = {}) => {
-		callCount++;
-		const request = new Request(urlOrRequest, options);
-		contentTypes.push(request.headers.get('content-type'));
-		contentLengths.push(request.headers.get('content-length'));
-
-		return new Response(null, {status: callCount === 1 ? 503 : 200});
-	};
+	const mockFetch = createRecordedResponseFetch({
+		onRequest(request) {
+			contentTypes.push(request.headers.get('content-type'));
+			contentLengths.push(request.headers.get('content-length'));
+		},
+	});
 
 	const fetchWithRetry = withHeaders(withRetry(mockFetch, {backoff: () => 0}), {'x-default': 'value'});
-	const formData = new FormData();
-	formData.append('field', 'value');
-	const request = new Request('https://example.com/api', {
-		method: 'PUT',
-		body: 'original-body',
-		headers: {
-			'content-type': 'text/plain;charset=UTF-8',
-			'content-length': '999',
-		},
+	const formData = createFormDataBody();
+	const request = createBodyOverrideRequest({
+		'content-type': 'text/plain;charset=UTF-8',
+		'content-length': '999',
 	});
 
 	const response = await fetchWithRetry(request, {body: formData});
 	t.is(response.status, 200);
-	t.true(contentTypes[0].startsWith('multipart/form-data; boundary='));
-	t.true(contentTypes[1].startsWith('multipart/form-data; boundary='));
-	t.is(contentLengths[0], null);
-	t.is(contentLengths[1], null);
+	t.deepEqual(contentTypes, ['text/plain;charset=UTF-8', 'text/plain;charset=UTF-8']);
+	t.deepEqual(contentLengths, ['999', '999']);
+});
+
+test('Request body overrides preserve explicit replacement body headers and non-body Request headers on retry', async t => {
+	let retryRequest;
+	const mockFetch = createRecordedResponseFetch({
+		onRequest(request, callCount) {
+			if (callCount === 2) {
+				retryRequest = request;
+			}
+		},
+	});
+
+	const fetchWithRetry = withRetry(mockFetch, {backoff: () => 0});
+	const request = createBodyOverrideRequest({
+		'content-type': 'text/plain;charset=UTF-8',
+		'content-language': 'en',
+		'content-length': '999',
+		'x-request': 'yes',
+	});
+
+	const response = await fetchWithRetry(request, {
+		body: 'replacement-body',
+		headers: {
+			'content-type': 'application/custom',
+			'content-language': 'de',
+			'content-length': '16',
+			'x-call': 'yes',
+		},
+	});
+
+	t.is(response.status, 200);
+	t.is(retryRequest.headers.get('content-type'), 'application/custom');
+	t.is(retryRequest.headers.get('content-language'), 'de');
+	t.is(retryRequest.headers.get('content-length'), '16');
+	t.is(retryRequest.headers.get('x-request'), 'yes');
+	t.is(retryRequest.headers.get('x-call'), 'yes');
+});
+
+test('Request body overrides preserve explicit Request body headers on retry when no per-call headers are provided', async t => {
+	let retryRequest;
+	const mockFetch = createRecordedResponseFetch({
+		onRequest(request, callCount) {
+			if (callCount === 2) {
+				retryRequest = request;
+			}
+		},
+	});
+
+	const fetchWithRetry = withRetry(mockFetch, {backoff: () => 0});
+	const request = createBodyOverrideRequest({
+		'content-type': 'application/json',
+		'content-language': 'fr',
+		'content-location': '/payload',
+		'content-encoding': 'br',
+		'x-request': 'yes',
+	});
+
+	const response = await fetchWithRetry(request, {
+		body: 'replacement-body',
+	});
+
+	t.is(response.status, 200);
+	t.is(retryRequest.headers.get('content-type'), 'application/json');
+	t.is(retryRequest.headers.get('content-language'), 'fr');
+	t.is(retryRequest.headers.get('content-location'), '/payload');
+	t.is(retryRequest.headers.get('content-encoding'), 'br');
+	t.is(retryRequest.headers.get('x-request'), 'yes');
+});
+
+test('Request body overrides preserve outer withHeaders body defaults across every attempt when the original Request has no body headers', async t => {
+	const contentTypes = [];
+	const contentLanguages = [];
+	const contentLengths = [];
+	const defaultHeaders = [];
+
+	const mockFetch = createRecordedResponseFetch({
+		onRequest(request) {
+			contentTypes.push(request.headers.get('content-type'));
+			contentLanguages.push(request.headers.get('content-language'));
+			contentLengths.push(request.headers.get('content-length'));
+			defaultHeaders.push(request.headers.get('x-default'));
+		},
+	});
+
+	const fetchWithRetry = withHeaders(withRetry(mockFetch, {backoff: () => 0}), {
+		'content-type': 'application/default',
+		'content-language': 'fr',
+		'content-length': '123',
+		'x-default': 'yes',
+	});
+	const request = createBodyOverrideRequest(undefined, new Uint8Array([1, 2, 3]));
+
+	const response = await fetchWithRetry(request, {
+		body: 'replacement-body',
+	});
+
+	t.is(response.status, 200);
+	t.deepEqual(contentTypes, ['application/default', 'application/default']);
+	t.deepEqual(contentLanguages, ['fr', 'fr']);
+	t.deepEqual(contentLengths, ['123', '123']);
+	t.deepEqual(defaultHeaders, ['yes', 'yes']);
+});
+
+test('Request body overrides preserve explicit replacement body headers over outer withHeaders defaults across every attempt', async t => {
+	const contentTypes = [];
+	const contentLanguages = [];
+	const contentLengths = [];
+	const defaultHeaders = [];
+
+	const mockFetch = createRecordedResponseFetch({
+		onRequest(request) {
+			contentTypes.push(request.headers.get('content-type'));
+			contentLanguages.push(request.headers.get('content-language'));
+			contentLengths.push(request.headers.get('content-length'));
+			defaultHeaders.push(request.headers.get('x-default'));
+		},
+	});
+
+	const fetchWithRetry = withHeaders(withRetry(mockFetch, {backoff: () => 0}), {
+		'content-type': 'application/default',
+		'content-language': 'fr',
+		'content-length': '123',
+		'x-default': 'yes',
+	});
+	const request = createBodyOverrideRequest(undefined, new Uint8Array([1, 2, 3]));
+
+	const response = await fetchWithRetry(request, {
+		body: 'replacement-body',
+		headers: {
+			'content-type': 'application/custom',
+			'content-language': 'de',
+			'content-length': '16',
+		},
+	});
+
+	t.is(response.status, 200);
+	t.deepEqual(contentTypes, ['application/custom', 'application/custom']);
+	t.deepEqual(contentLanguages, ['de', 'de']);
+	t.deepEqual(contentLengths, ['16', '16']);
+	t.deepEqual(defaultHeaders, ['yes', 'yes']);
+});
+
+test('Request body overrides preserve explicit replacement body headers over nested withHeaders defaults across every attempt', async t => {
+	const contentTypes = [];
+	const contentLanguages = [];
+	const contentLengths = [];
+	const outerDefaultHeaders = [];
+	const innerDefaultHeaders = [];
+
+	const mockFetch = createRecordedResponseFetch({
+		onRequest(request) {
+			contentTypes.push(request.headers.get('content-type'));
+			contentLanguages.push(request.headers.get('content-language'));
+			contentLengths.push(request.headers.get('content-length'));
+			outerDefaultHeaders.push(request.headers.get('x-outer-default'));
+			innerDefaultHeaders.push(request.headers.get('x-inner-default'));
+		},
+	});
+
+	const fetchWithRetry = withHeaders(withHeaders(withRetry(mockFetch, {backoff: () => 0}), {
+		'Content-Type': 'application/inner-default',
+		'Content-Language': 'nb',
+		'Content-Length': '321',
+		'X-Inner-Default': 'yes',
+	}), {
+		'content-type': 'application/outer-default',
+		'content-language': 'fr',
+		'content-length': '123',
+		'x-outer-default': 'yes',
+	});
+	const request = createBodyOverrideRequest(undefined, new Uint8Array([1, 2, 3]));
+
+	const response = await fetchWithRetry(request, {
+		body: 'replacement-body',
+		headers: {
+			'content-type': 'application/custom',
+			'content-language': 'de',
+			'content-length': '16',
+		},
+	});
+
+	t.is(response.status, 200);
+	t.deepEqual(contentTypes, ['application/custom', 'application/custom']);
+	t.deepEqual(contentLanguages, ['de', 'de']);
+	t.deepEqual(contentLengths, ['16', '16']);
+	t.deepEqual(outerDefaultHeaders, ['yes', 'yes']);
+	t.deepEqual(innerDefaultHeaders, ['yes', 'yes']);
+});
+
+test('Request body overrides preserve explicit Request body headers across retry through nested withHeaders wrappers', async t => {
+	const contentTypes = [];
+	const contentLanguages = [];
+	const contentLengths = [];
+	const outerDefaultHeaders = [];
+	const innerDefaultHeaders = [];
+
+	const mockFetch = createRecordedResponseFetch({
+		onRequest(request) {
+			contentTypes.push(request.headers.get('content-type'));
+			contentLanguages.push(request.headers.get('content-language'));
+			contentLengths.push(request.headers.get('content-length'));
+			outerDefaultHeaders.push(request.headers.get('x-outer-default'));
+			innerDefaultHeaders.push(request.headers.get('x-inner-default'));
+		},
+	});
+
+	const fetchWithRetry = withHeaders(withHeaders(withRetry(mockFetch, {backoff: () => 0}), {
+		'x-inner-default': 'yes',
+	}), {
+		'x-outer-default': 'yes',
+	});
+	const formData = createFormDataBody();
+	const request = createBodyOverrideRequest({
+		'content-type': 'text/plain;charset=UTF-8',
+		'content-language': 'fr',
+		'content-length': '999',
+	});
+
+	const response = await fetchWithRetry(request, {body: formData});
+
+	t.is(response.status, 200);
+	t.deepEqual(contentTypes, ['text/plain;charset=UTF-8', 'text/plain;charset=UTF-8']);
+	t.deepEqual(contentLanguages, ['fr', 'fr']);
+	t.deepEqual(contentLengths, ['999', '999']);
+	t.deepEqual(outerDefaultHeaders, ['yes', 'yes']);
+	t.deepEqual(innerDefaultHeaders, ['yes', 'yes']);
 });
 
 test('composes with withHttpError in pipeline', async t => {
@@ -1038,4 +1257,109 @@ test('handles mixed network error then status code error across retries', async 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 200);
 	t.is(mockFetch.callCount, 3);
+});
+
+test('discards intermediate response bodies between retries', async t => {
+	const canceledBodies = [];
+	const createCancelableResponse = status => {
+		const body = new ReadableStream({
+			start(controller) {
+				controller.enqueue(new TextEncoder().encode('data'));
+				controller.close();
+			},
+			cancel() {
+				canceledBodies.push(status);
+			},
+		});
+
+		return new Response(body, {status});
+	};
+
+	const mockFetch = createMockFetch([
+		createCancelableResponse(503),
+		createCancelableResponse(503),
+		createCancelableResponse(200),
+	]);
+	const fetchWithRetry = withRetry(mockFetch, {retries: 3, backoff: () => 0});
+
+	const response = await fetchWithRetry('https://example.com');
+	t.is(response.status, 200);
+	t.is(mockFetch.callCount, 3);
+	t.deepEqual(canceledBodies, [503, 503]);
+});
+
+test('methods: [] prevents all retries', async t => {
+	const mockFetch = createMockFetch([
+		createResponse(503),
+	]);
+	const fetchWithRetry = withRetry(mockFetch, {methods: [], backoff: () => 0});
+
+	const response = await fetchWithRetry('https://example.com');
+	t.is(response.status, 503);
+	t.is(mockFetch.callCount, 1);
+});
+
+test('statusCodes: [] means only network errors trigger retry', async t => {
+	const mockFetch = createMockFetch([
+		createResponse(503),
+	]);
+	const fetchWithRetry = withRetry(mockFetch, {statusCodes: [], backoff: () => 0});
+
+	// 503 should not be retried with empty statusCodes
+	const response = await fetchWithRetry('https://example.com');
+	t.is(response.status, 503);
+	t.is(mockFetch.callCount, 1);
+
+	// But network errors should still be retried
+	const mockFetch2 = createMockFetch([
+		networkError(),
+		createResponse(200),
+	]);
+	const fetchWithRetry2 = withRetry(mockFetch2, {statusCodes: [], backoff: () => 0});
+
+	const response2 = await fetchWithRetry2('https://example.com');
+	t.is(response2.status, 200);
+	t.is(mockFetch2.callCount, 2);
+});
+
+test('abort signal during async shouldRetry rejects on the next delay', async t => {
+	const controller = new AbortController();
+	const mockFetch = createMockFetch([
+		createResponse(503),
+		createResponse(200),
+	]);
+
+	const fetchWithRetry = withRetry(mockFetch, {
+		retries: 2,
+		backoff: () => 5000,
+		async shouldRetry() {
+			// Abort while shouldRetry is evaluating
+			controller.abort();
+			return true;
+		},
+	});
+
+	await t.throwsAsync(
+		fetchWithRetry('https://example.com', {signal: controller.signal}),
+		{name: 'AbortError'},
+	);
+
+	t.is(mockFetch.callCount, 1);
+});
+
+test('retries: 0 never invokes shouldRetry', async t => {
+	let shouldRetryCalled = false;
+	const mockFetch = createMockFetch([createResponse(503)]);
+	const fetchWithRetry = withRetry(mockFetch, {
+		retries: 0,
+		shouldRetry() {
+			shouldRetryCalled = true;
+			return true;
+		},
+	});
+
+	const response = await fetchWithRetry('https://example.com');
+	t.is(response.status, 503);
+	t.is(mockFetch.callCount, 1);
+	t.false(shouldRetryCalled);
 });

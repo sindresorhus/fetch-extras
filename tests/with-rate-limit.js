@@ -481,6 +481,27 @@ rateLimitTest('forwards request arguments to the inner fetch', async t => {
 	t.deepEqual(receivedOptions.headers, {'Content-Type': 'application/json'});
 });
 
+rateLimitTest('fetch errors propagate without corrupting rate limiter state', async t => {
+	let callCount = 0;
+	const mockFetch = async () => {
+		callCount++;
+
+		if (callCount === 2) {
+			throw new TypeError('fetch failed');
+		}
+
+		return new Response('ok', {status: 200});
+	};
+
+	const limitedFetch = withRateLimit(mockFetch, {requestsPerInterval: 10, interval: 1000});
+
+	await limitedFetch('/a');
+	await t.throwsAsync(limitedFetch('/b'), {instanceOf: TypeError, message: 'fetch failed'});
+	const response = await limitedFetch('/c');
+	t.is(response.status, 200);
+	t.is(callCount, 3);
+});
+
 rateLimitTest('sliding window allows new requests as old ones expire', async t => {
 	const mockFetch = createMockFetch();
 	const limitedFetch = withRateLimit(mockFetch, {requestsPerInterval: 3, interval: 100});

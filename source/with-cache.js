@@ -1,8 +1,14 @@
-import {copyFetchMetadata, resolveRequestUrl} from './utilities.js';
+import {copyFetchMetadata, resolveRequestHeadersSymbol, resolveRequestUrl} from './utilities.js';
 
 const nonInvalidatingMethods = new Set(['HEAD', 'OPTIONS', 'TRACE']);
 
 function getHeaders(urlOrRequest, options) {
+	const resolvedHeaders = this?.[resolveRequestHeadersSymbol]?.(urlOrRequest, options);
+
+	if (resolvedHeaders) {
+		return new Headers(resolvedHeaders);
+	}
+
 	return new Headers(options.headers ?? (urlOrRequest instanceof Request ? urlOrRequest.headers : undefined));
 }
 
@@ -12,7 +18,7 @@ function getRequestContext(fetchFunction, urlOrRequest, options) {
 		url: resolveRequestUrl(fetchFunction, urlOrRequest),
 		cacheMode: options.cache ?? (urlOrRequest instanceof Request ? urlOrRequest.cache : undefined),
 		signal: options.signal ?? (urlOrRequest instanceof Request ? urlOrRequest.signal : undefined),
-		isRangedRequest: getHeaders(urlOrRequest, options).has('range'),
+		isRangedRequest: getHeaders.call(fetchFunction, urlOrRequest, options).has('range'),
 	};
 }
 

@@ -2,26 +2,31 @@ import {
 	blockedRequestBodyHeaderNames,
 	blockedDefaultHeaderNamesSymbol,
 	copyFetchMetadata,
+	deleteHeaders,
 	inheritedRequestBodyHeaderNamesSymbol,
 	isByteStream,
 	trackByteProgress,
 	trackProgress,
 } from './utilities.js';
 
-function stripInheritedBodyHeaders(headers, headerNames) {
-	const cleanedHeaders = new Headers(headers);
-
-	for (const headerName of headerNames) {
-		cleanedHeaders.delete(headerName);
-	}
-
-	return cleanedHeaders;
-}
-
 function stripContentLength(headers) {
 	const cleanedHeaders = new Headers(headers);
 	cleanedHeaders.delete('content-length');
 	return cleanedHeaders;
+}
+
+function mergeMissingRequestHeaders(headers, requestHeaders) {
+	const mergedHeaders = new Headers(headers);
+
+	for (const [headerName, headerValue] of requestHeaders) {
+		if (headerName === 'content-length' || mergedHeaders.has(headerName)) {
+			continue;
+		}
+
+		mergedHeaders.set(headerName, headerValue);
+	}
+
+	return mergedHeaders;
 }
 
 function requestSnapshot(request) {
@@ -32,6 +37,7 @@ function requestSnapshot(request) {
 		mode: request.mode,
 		credentials: request.credentials,
 		cache: request.cache,
+		keepalive: request.keepalive,
 		redirect: request.redirect,
 		integrity: request.integrity,
 		signal: request.signal,
@@ -66,7 +72,12 @@ export function withUploadProgress(fetchFunction, {onProgress} = {}) {
 					if (options[inheritedRequestBodyHeaderNamesSymbol]) {
 						options = {
 							...options,
-							headers: stripInheritedBodyHeaders(options.headers, options[inheritedRequestBodyHeaderNamesSymbol]),
+							headers: deleteHeaders(new Headers(options.headers), options[inheritedRequestBodyHeaderNamesSymbol]),
+						};
+					} else {
+						options = {
+							...options,
+							headers: mergeMissingRequestHeaders(options.headers, urlOrRequest.headers),
 						};
 					}
 

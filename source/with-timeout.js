@@ -1,14 +1,17 @@
-import {timeoutDurationSymbol} from './utilities.js';
+import {
+	copyFetchMetadata,
+	getRequestSignal,
+	getTimeoutSignal,
+	timeoutDurationSymbol,
+} from './utilities.js';
 
 export function withTimeout(fetchFunction, timeout) {
 	const fetchWithTimeout = async (urlOrRequest, options = {}) => {
-		const providedSignal = options.signal ?? (urlOrRequest instanceof Request && urlOrRequest.signal);
-		const timeoutSignal = AbortSignal.timeout(timeout);
-		const signal = providedSignal ? AbortSignal.any([providedSignal, timeoutSignal]) : timeoutSignal;
+		const signal = getTimeoutSignal(timeout, getRequestSignal(urlOrRequest, options));
 		return fetchFunction(urlOrRequest, {...options, signal});
 	};
 
 	fetchWithTimeout[timeoutDurationSymbol] = timeout;
 
-	return fetchWithTimeout;
+	return copyFetchMetadata(fetchWithTimeout, fetchFunction);
 }

@@ -1,5 +1,10 @@
 import parseLinkHeader from './parse-link-header.js';
-import {blockedDefaultHeaderNamesSymbol, delay} from './utilities.js';
+import {
+	blockedDefaultHeaderNamesSymbol,
+	delay,
+	requestBodyHeaderNames,
+	requestSnapshot,
+} from './utilities.js';
 
 const defaultPaginationOptions = {
 	async transform(response) {
@@ -29,12 +34,6 @@ const defaultPaginationOptions = {
 	stackAllItems: false,
 };
 
-const requestBodyHeaderNames = [
-	'content-encoding',
-	'content-language',
-	'content-location',
-	'content-type',
-];
 const sensitiveHeaderNames = [
 	'authorization',
 	'cookie',
@@ -68,21 +67,6 @@ const markToBlockDefaultHeaders = (object, headerNames) => {
 };
 
 const methodCanHaveBody = method => method === undefined || !['get', 'head'].includes(method.toLowerCase());
-
-const requestSnapshot = request => ({
-	method: request.method,
-	referrer: request.referrer,
-	referrerPolicy: request.referrerPolicy,
-	mode: request.mode,
-	credentials: request.credentials,
-	cache: request.cache,
-	redirect: request.redirect,
-	integrity: request.integrity,
-	keepalive: request.keepalive,
-	signal: request.signal,
-	duplex: request.duplex,
-	priority: request.priority,
-});
 
 const requestWithoutBody = request => ({
 	...requestSnapshot(request),

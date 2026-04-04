@@ -329,6 +329,20 @@ test('withBaseUrl - input with only fragment', async t => {
 	t.is(response.url, 'https://api.example.com/docs#section');
 });
 
+test('withBaseUrl - query-only input replaces base URL query params', async t => {
+	const fetchWithBaseUrl = withBaseUrl(mockFetch, 'https://api.example.com/search?page=1');
+	const response = await fetchWithBaseUrl('?q=test');
+
+	t.is(response.url, 'https://api.example.com/search?q=test');
+});
+
+test('withBaseUrl - fragment-only input preserves base URL query params', async t => {
+	const fetchWithBaseUrl = withBaseUrl(mockFetch, 'https://api.example.com/docs?key=value');
+	const response = await fetchWithBaseUrl('#section');
+
+	t.is(response.url, 'https://api.example.com/docs?key=value#section');
+});
+
 test('withBaseUrl - input that looks like domain but is treated as path', async t => {
 	const fetchWithBaseUrl = withBaseUrl(mockFetch, 'https://api.example.com');
 	const response = await fetchWithBaseUrl('example.com/path');

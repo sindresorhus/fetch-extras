@@ -78,6 +78,91 @@ test('withHeaders - options.headers takes priority over Request headers', async 
 	t.is(options.headers.get('authorization'), 'Bearer from-options');
 });
 
+test('withHeaders - Request body overrides preserve inherited body headers on the initial request', async t => {
+	const mockFetch = createCapturingFetch();
+	const fetchWithHeaders = withHeaders(mockFetch, {'X-Default': 'yes'});
+
+	const request = new Request('https://example.com/api', {
+		method: 'POST',
+		body: JSON.stringify({old: true}),
+		headers: {
+			'Content-Type': 'application/json',
+			'Content-Language': 'en',
+			Authorization: 'Bearer from-request',
+		},
+	});
+
+	await fetchWithHeaders(request, {body: 'replacement body'});
+
+	const {options} = mockFetch.calls[0];
+	t.is(options.headers.get('content-type'), 'application/json');
+	t.is(options.headers.get('content-language'), 'en');
+	t.is(options.headers.get('authorization'), 'Bearer from-request');
+	t.is(options.headers.get('x-default'), 'yes');
+});
+
+test('withHeaders - Request body overrides preserve inherited Request body headers over defaults on the initial request', async t => {
+	const mockFetch = createCapturingFetch();
+	const fetchWithHeaders = withHeaders(mockFetch, {
+		'Content-Type': 'application/json',
+		'Content-Language': 'fr',
+		'X-Default': 'yes',
+	});
+
+	const request = new Request('https://example.com/api', {
+		method: 'POST',
+		body: 'old body',
+		headers: {
+			Authorization: 'Bearer from-request',
+		},
+	});
+
+	await fetchWithHeaders(request, {body: 'replacement body'});
+
+	const {options} = mockFetch.calls[0];
+	t.is(options.headers.get('content-type'), 'text/plain;charset=UTF-8');
+	t.is(options.headers.get('content-language'), 'fr');
+	t.is(options.headers.get('authorization'), 'Bearer from-request');
+	t.is(options.headers.get('x-default'), 'yes');
+});
+
+test('withHeaders - Request body overrides preserve explicit per-call body headers on the initial request', async t => {
+	const mockFetch = createCapturingFetch();
+	const fetchWithHeaders = withHeaders(mockFetch, {
+		'Content-Type': 'application/json',
+		'Content-Language': 'fr',
+		'X-Default': 'yes',
+	});
+
+	const request = new Request('https://example.com/api', {
+		method: 'POST',
+		body: 'old body',
+		headers: {
+			'Content-Type': 'text/plain;charset=UTF-8',
+			'Content-Language': 'en',
+			Authorization: 'Bearer from-request',
+		},
+	});
+
+	await fetchWithHeaders(request, {
+		body: 'replacement body',
+		headers: {
+			'Content-Type': 'application/x-www-form-urlencoded',
+			'Content-Language': 'de',
+			'Content-Length': '16',
+			'X-Trace': 'abc',
+		},
+	});
+
+	const {options} = mockFetch.calls[0];
+	t.is(options.headers.get('content-type'), 'application/x-www-form-urlencoded');
+	t.is(options.headers.get('content-language'), 'de');
+	t.is(options.headers.get('content-length'), '16');
+	t.is(options.headers.get('authorization'), 'Bearer from-request');
+	t.is(options.headers.get('x-default'), 'yes');
+	t.is(options.headers.get('x-trace'), 'abc');
+});
+
 test('withHeaders - preserves non-conflicting Request headers when options.headers is also provided', async t => {
 	const mockFetch = createCapturingFetch();
 	const fetchWithHeaders = withHeaders(mockFetch, {});

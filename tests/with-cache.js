@@ -5,7 +5,7 @@ import {
 	withCache,
 	withHeaders,
 } from '../source/index.js';
-import {timeoutDurationSymbol} from '../source/utilities.js';
+import {blockedDefaultHeaderNamesSymbol, timeoutDurationSymbol} from '../source/utilities.js';
 
 const createMockFetch = (status = 200) => {
 	let callCount = 0;
@@ -303,6 +303,250 @@ test('ranged GET requests added by an inner wrapper are not cached', async t => 
 	t.is(await secondResponse.text(), 'partial-2');
 
 	t.is(callCount, 2);
+});
+
+test('ranged GET requests added by an inner wrapper are not cached when the server returns 200', async t => {
+	let callCount = 0;
+	const mockFetch = async () => {
+		callCount++;
+		return new Response(`full-${callCount}`, {status: 200});
+	};
+
+	const cachedFetch = pipeline(
+		mockFetch,
+		fetchFunction => withHeaders(fetchFunction, {Range: 'bytes=0-3'}),
+		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+	);
+
+	const firstResponse = await cachedFetch('https://example.com/api');
+	t.is(await firstResponse.text(), 'full-1');
+
+	const secondResponse = await cachedFetch('https://example.com/api');
+	t.is(await secondResponse.text(), 'full-2');
+
+	t.is(callCount, 2);
+});
+
+test('ranged GET requests added by nested inner wrappers are not cached when the server returns 200', async t => {
+	let callCount = 0;
+	const mockFetch = async () => {
+		callCount++;
+		return new Response(`full-${callCount}`, {status: 200});
+	};
+
+	const cachedFetch = pipeline(
+		mockFetch,
+		fetchFunction => withHeaders(fetchFunction, {Range: 'bytes=0-3'}),
+		fetchFunction => withHeaders(fetchFunction, {'x-test': '1'}),
+		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+	);
+
+	const firstResponse = await cachedFetch('https://example.com/api');
+	t.is(await firstResponse.text(), 'full-1');
+
+	const secondResponse = await cachedFetch('https://example.com/api');
+	t.is(await secondResponse.text(), 'full-2');
+
+	t.is(callCount, 2);
+});
+
+test('ranged GET requests added by an inner wrapper bypass an existing cached full response', async t => {
+	let callCount = 0;
+	const mockFetch = async () => {
+		callCount++;
+		return new Response(`full-${callCount}`, {status: 200});
+	};
+
+	const cachedFetch = pipeline(
+		mockFetch,
+		fetchFunction => withHeaders(fetchFunction, {Range: 'bytes=0-3'}),
+		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+	);
+
+	const fullResponse = await cachedFetch('https://example.com/api', {
+		[blockedDefaultHeaderNamesSymbol]: ['range'],
+	});
+	t.is(await fullResponse.text(), 'full-1');
+
+	const rangedResponse = await cachedFetch('https://example.com/api');
+	t.is(await rangedResponse.text(), 'full-2');
+
+	t.is(callCount, 2);
+});
+
+test('ranged GET requests added by an inner wrapper can be blocked per call and then cached', async t => {
+	let callCount = 0;
+	const mockFetch = async () => {
+		callCount++;
+		return new Response(`full-${callCount}`, {status: 200});
+	};
+
+	const cachedFetch = pipeline(
+		mockFetch,
+		fetchFunction => withHeaders(fetchFunction, {Range: 'bytes=0-3'}),
+		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+	);
+
+	const firstResponse = await cachedFetch('https://example.com/api', {
+		[blockedDefaultHeaderNamesSymbol]: ['range'],
+	});
+	t.is(await firstResponse.text(), 'full-1');
+
+	const secondResponse = await cachedFetch('https://example.com/api', {
+		[blockedDefaultHeaderNamesSymbol]: ['range'],
+	});
+	t.is(await secondResponse.text(), 'full-1');
+
+	t.is(callCount, 1);
+});
+
+test('blocking an inner Range default for one call does not stop later effective range requests from bypassing cache', async t => {
+	let callCount = 0;
+	const mockFetch = async () => {
+		callCount++;
+		return new Response(`full-${callCount}`, {status: 200});
+	};
+
+	const cachedFetch = pipeline(
+		mockFetch,
+		fetchFunction => withHeaders(fetchFunction, {Range: 'bytes=0-3'}),
+		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+	);
+
+	const fullResponse = await cachedFetch('https://example.com/api', {
+		[blockedDefaultHeaderNamesSymbol]: ['range'],
+	});
+	t.is(await fullResponse.text(), 'full-1');
+
+	const cachedResponse = await cachedFetch('https://example.com/api', {
+		[blockedDefaultHeaderNamesSymbol]: ['range'],
+	});
+	t.is(await cachedResponse.text(), 'full-1');
+
+	const rangedResponse = await cachedFetch('https://example.com/api');
+	t.is(await rangedResponse.text(), 'full-2');
+
+	t.is(callCount, 2);
+});
+
+test('explicit per-call Range headers still bypass cache when an inner Range default is blocked', async t => {
+	let callCount = 0;
+	const observedRanges = [];
+	const mockFetch = async (_urlOrRequest, options) => {
+		callCount++;
+		observedRanges.push(new Headers(options?.headers).get('range'));
+		return new Response(`partial-${callCount}`, {status: 200});
+	};
+
+	const cachedFetch = pipeline(
+		mockFetch,
+		fetchFunction => withHeaders(fetchFunction, {Range: 'bytes=0-3'}),
+		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+	);
+
+	const firstResponse = await cachedFetch('https://example.com/api', {
+		headers: {Range: 'bytes=4-7'},
+		[blockedDefaultHeaderNamesSymbol]: ['range'],
+	});
+	t.is(await firstResponse.text(), 'partial-1');
+
+	const secondResponse = await cachedFetch('https://example.com/api', {
+		headers: {Range: 'bytes=4-7'},
+		[blockedDefaultHeaderNamesSymbol]: ['range'],
+	});
+	t.is(await secondResponse.text(), 'partial-2');
+
+	t.is(callCount, 2);
+	t.deepEqual(observedRanges, ['bytes=4-7', 'bytes=4-7']);
+});
+
+test('explicit Request Range headers still bypass cache when an inner Range default is blocked', async t => {
+	let callCount = 0;
+	const observedRanges = [];
+	const mockFetch = async (urlOrRequest, options) => {
+		callCount++;
+		observedRanges.push(new Headers(options?.headers ?? urlOrRequest.headers).get('range'));
+		return new Response(`partial-${callCount}`, {status: 200});
+	};
+
+	const cachedFetch = pipeline(
+		mockFetch,
+		fetchFunction => withHeaders(fetchFunction, {Range: 'bytes=0-3'}),
+		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+	);
+
+	const request = new Request('https://example.com/api', {
+		headers: {Range: 'bytes=4-7'},
+	});
+
+	const firstResponse = await cachedFetch(request, {
+		[blockedDefaultHeaderNamesSymbol]: ['range'],
+	});
+	t.is(await firstResponse.text(), 'partial-1');
+
+	const secondResponse = await cachedFetch(request, {
+		[blockedDefaultHeaderNamesSymbol]: ['range'],
+	});
+	t.is(await secondResponse.text(), 'partial-2');
+
+	t.is(callCount, 2);
+	t.deepEqual(observedRanges, ['bytes=4-7', 'bytes=4-7']);
+});
+
+test('Request metadata can block an inner Range default and allow caching', async t => {
+	let callCount = 0;
+	const observedRanges = [];
+	const mockFetch = async (urlOrRequest, options) => {
+		callCount++;
+		observedRanges.push(new Headers(options?.headers ?? urlOrRequest.headers).get('range'));
+		return new Response(`full-${callCount}`, {status: 200});
+	};
+
+	const cachedFetch = pipeline(
+		mockFetch,
+		fetchFunction => withHeaders(fetchFunction, {Range: 'bytes=0-3'}),
+		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+	);
+
+	const request = new Request('https://example.com/api');
+	request[blockedDefaultHeaderNamesSymbol] = ['range'];
+
+	const firstResponse = await cachedFetch(request);
+	t.is(await firstResponse.text(), 'full-1');
+
+	const secondResponse = await cachedFetch(request);
+	t.is(await secondResponse.text(), 'full-1');
+
+	t.is(callCount, 1);
+	t.deepEqual(observedRanges, [null]);
+});
+
+test('headers metadata can block an inner Range default and allow caching', async t => {
+	let callCount = 0;
+	const observedRanges = [];
+	const mockFetch = async (_urlOrRequest, options) => {
+		callCount++;
+		observedRanges.push(new Headers(options?.headers).get('range'));
+		return new Response(`full-${callCount}`, {status: 200});
+	};
+
+	const cachedFetch = pipeline(
+		mockFetch,
+		fetchFunction => withHeaders(fetchFunction, {Range: 'bytes=0-3'}),
+		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+	);
+
+	const headers = new Headers();
+	headers[blockedDefaultHeaderNamesSymbol] = ['range'];
+
+	const firstResponse = await cachedFetch('https://example.com/api', {headers});
+	t.is(await firstResponse.text(), 'full-1');
+
+	const secondResponse = await cachedFetch('https://example.com/api', {headers});
+	t.is(await secondResponse.text(), 'full-1');
+
+	t.is(callCount, 1);
+	t.deepEqual(observedRanges, [null]);
 });
 
 test('URL fragments do not create separate cache entries', async t => {
@@ -1324,6 +1568,93 @@ test('cache is populated after concurrent requests resolve', async t => {
 	// Subsequent call should hit cache
 	await cachedFetch('https://example.com/api');
 	t.is(mockFetch.callCount, 2);
+});
+
+test('mutation during in-flight GET prevents stale caching', async t => {
+	let callCount = 0;
+	let getResolve;
+
+	const mockFetch = async (url, options = {}) => {
+		callCount++;
+		const method = options.method ?? 'GET';
+
+		if (method === 'GET' && callCount === 1) {
+			// First GET is slow; wait for the mutation to happen
+			await new Promise(resolve => {
+				getResolve = resolve;
+			});
+
+			return new Response(JSON.stringify({stale: true}), {
+				status: 200,
+				headers: {'content-type': 'application/json'},
+			});
+		}
+
+		if (method === 'POST') {
+			return new Response(null, {status: 200});
+		}
+
+		return new Response(JSON.stringify({fresh: true}), {
+			status: 200,
+			headers: {'content-type': 'application/json'},
+		});
+	};
+
+	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+
+	// Start a slow GET
+	const slowGet = cachedFetch('https://example.com/api');
+
+	// While the GET is in-flight, mutate the same URL
+	await cachedFetch('https://example.com/api', {method: 'POST'});
+
+	// Let the slow GET complete
+	getResolve();
+	const staleResponse = await slowGet;
+	t.deepEqual(await staleResponse.json(), {stale: true});
+
+	// The stale GET result should NOT have been cached because the generation changed
+	const freshResponse = await cachedFetch('https://example.com/api');
+	t.deepEqual(await freshResponse.json(), {fresh: true});
+});
+
+test('TRACE method passes through without invalidating cache', async t => {
+	const mockFetch = createMockFetch();
+	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+
+	// Populate cache
+	const response1 = await cachedFetch('https://example.com/api');
+	t.deepEqual(await response1.json(), {callCount: 1});
+
+	// TRACE should pass through without invalidating
+	await cachedFetch('https://example.com/api', {method: 'TRACE'});
+	t.is(mockFetch.callCount, 2);
+
+	// Cache should still be intact
+	const response3 = await cachedFetch('https://example.com/api');
+	t.deepEqual(await response3.json(), {callCount: 1});
+	t.is(mockFetch.callCount, 2);
+});
+
+test('server 206 without client Range header is not cached', async t => {
+	let callCount = 0;
+	const mockFetch = async () => {
+		callCount++;
+		return new Response(`response-${callCount}`, {status: callCount === 1 ? 206 : 200});
+	};
+
+	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+
+	// Server returns 206 even though we didn't send a Range header
+	const response1 = await cachedFetch('https://example.com/api');
+	t.is(response1.status, 206);
+	t.is(await response1.text(), 'response-1');
+
+	// Should NOT have been cached
+	const response2 = await cachedFetch('https://example.com/api');
+	t.is(response2.status, 200);
+	t.is(await response2.text(), 'response-2');
+	t.is(callCount, 2);
 });
 
 test('URLs with different query strings are cached separately', async t => {

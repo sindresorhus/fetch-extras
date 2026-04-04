@@ -39,7 +39,7 @@ const fetchWithAll = pipeline(
 const response = await fetchWithAll('/users');
 ```
 
-Works seamlessly with `paginate()`:
+Works with `paginate()`:
 
 ```js
 import {paginate, withBaseUrl} from 'fetch-extras';

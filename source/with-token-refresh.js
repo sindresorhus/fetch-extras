@@ -1,4 +1,11 @@
-import {blockedRequestBodyHeaderNames, copyFetchMetadata, timeoutDurationSymbol} from './utilities.js';
+import {
+	copyFetchMetadata,
+	discardBody,
+	getFetchSignal,
+	getRequestReplayHeaders,
+	getRequestSignal,
+	resolveAuthorizationHeaderSymbol,
+} from './utilities.js';
 
 /**
 Wraps a fetch function to automatically refresh the token and retry the request on a `401 Unauthorized` response.
@@ -18,24 +25,8 @@ export function withTokenRefresh(fetchFunction, {refreshToken}) {
 	const refreshEntries = new Map();
 	const getAbortReason = signal => signal?.reason ?? new DOMException('This operation was aborted', 'AbortError');
 
-	const getEffectiveSignal = providedSignal => {
-		// Timeout support here is intentionally narrow: we only honor the internal timeout metadata that wrapper builders forward.
-		const timeoutDuration = fetchFunction[timeoutDurationSymbol];
-		const timeoutSignal = timeoutDuration === undefined ? undefined : AbortSignal.timeout(timeoutDuration);
-
-		if (providedSignal) {
-			return timeoutSignal ? AbortSignal.any([providedSignal, timeoutSignal]) : providedSignal;
-		}
-
-		return timeoutSignal;
-	};
-
 	const withSignal = (options, signal) => signal ? {...options, signal} : options;
-	const discardBody = async body => {
-		try {
-			await body?.cancel?.();
-		} catch {}
-	};
+	const isAsyncIterable = value => value !== undefined && !(value instanceof ReadableStream) && typeof value[Symbol.asyncIterator] === 'function';
 
 	const returnResponse = async (response, retryBody) => {
 		await discardBody(retryBody);
@@ -63,25 +54,6 @@ export function withTokenRefresh(fetchFunction, {refreshToken}) {
 
 		refreshEntries.set(authorization, refreshEntry);
 		return refreshEntry;
-	};
-
-	const getRequestHeaders = (request, options) => {
-		const requestHeaders = new Headers(request?.headers);
-
-		if (request && options.body !== undefined) {
-			// A replacement body must not inherit body-specific headers from the original Request.
-			for (const headerName of blockedRequestBodyHeaderNames) {
-				requestHeaders.delete(headerName);
-			}
-		}
-
-		if (options.headers) {
-			for (const [key, value] of new Headers(options.headers)) {
-				requestHeaders.set(key, value);
-			}
-		}
-
-		return requestHeaders;
 	};
 
 	const getToken = async (authorization, signal) => {
@@ -146,8 +118,8 @@ export function withTokenRefresh(fetchFunction, {refreshToken}) {
 		const request = urlOrRequest instanceof Request
 			? urlOrRequest
 			: undefined;
-		const signal = getEffectiveSignal(options.signal ?? request?.signal);
-		const requestHeaders = getRequestHeaders(request, options);
+		const signal = getFetchSignal(fetchFunction, getRequestSignal(urlOrRequest, options));
+		const requestHeaders = getRequestReplayHeaders(request, options);
 		let initialOptions = request
 			? {...options, headers: requestHeaders}
 			: options;
@@ -168,7 +140,7 @@ export function withTokenRefresh(fetchFunction, {refreshToken}) {
 		}
 
 		initialOptions = withSignal(initialOptions, signal);
-		const authorization = requestHeaders.get('Authorization');
+		const authorization = fetchFunction[resolveAuthorizationHeaderSymbol]?.(urlOrRequest, initialOptions) ?? requestHeaders.get('Authorization');
 		let response;
 
 		try {
@@ -183,7 +155,10 @@ export function withTokenRefresh(fetchFunction, {refreshToken}) {
 		}
 
 		// Boundary: bare Request bodies are not retried because cloning every Request up front would penalize successful uploads too.
-		if (request?.body && options.body === undefined) {
+		if (
+			(request?.body && options.body === undefined)
+			|| isAsyncIterable(options.body)
+		) {
 			return returnResponse(response, retryBody);
 		}
 
@@ -201,7 +176,9 @@ export function withTokenRefresh(fetchFunction, {refreshToken}) {
 			return returnResponse(response, retryBody);
 		}
 
-		const headers = new Headers(requestHeaders);
+		const headers = request && options.body !== undefined
+			? getRequestReplayHeaders(request, options)
+			: new Headers(requestHeaders);
 
 		// The original 401 response is never exposed once we retry, so release its body before issuing the second request.
 		await discardBody(response.body);

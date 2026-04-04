@@ -26,6 +26,29 @@ const createMockFetch = ({initialStatus = 401, retryStatus = 200} = {}) => {
 	return {mockFetch, getCallCount: () => callCount};
 };
 
+const createBodyOverrideRequest = (headers, body = 'original-body') => new Request('https://example.com/api', {
+	method: 'POST',
+	body,
+	headers,
+});
+
+const createFormDataBody = () => {
+	const formData = new FormData();
+	formData.append('field', 'value');
+	return formData;
+};
+
+const createRecordedResponseFetch = ({initialStatus = 401, retryStatus = 200, onRequest}) => {
+	let callCount = 0;
+
+	return async (urlOrRequest, options = {}) => {
+		callCount++;
+		onRequest?.(new Request(urlOrRequest, options), callCount);
+
+		return new Response(null, {status: callCount === 1 ? initialStatus : retryStatus});
+	};
+};
+
 test('passes through non-401 responses without refreshing', async t => {
 	const {mockFetch, getCallCount} = createMockFetch({initialStatus: 200});
 	let refreshCalled = false;
@@ -658,14 +681,19 @@ test('retries streamed override body for Request input without consuming it twic
 	t.deepEqual(bodies, ['override-body', 'override-body']);
 });
 
-test('Request body overrides strip inherited body headers on the first attempt', async t => {
-	let firstContentType;
-	let firstContentLength;
+test('does not retry AsyncIterable options body', async t => {
+	let callCount = 0;
+	const bodies = [];
+	const body = {
+		async * [Symbol.asyncIterator]() {
+			yield new TextEncoder().encode('async-iterable-body');
+		},
+	};
 
 	const mockFetch = async (urlOrRequest, options = {}) => {
+		callCount++;
 		const request = new Request(urlOrRequest, options);
-		firstContentType = request.headers.get('content-type');
-		firstContentLength = request.headers.get('content-length');
+		bodies.push(await request.text());
 		return new Response(null, {status: 401});
 	};
 
@@ -675,40 +703,29 @@ test('Request body overrides strip inherited body headers on the first attempt',
 		},
 	});
 
-	const request = new Request('https://example.com/api', {
+	const response = await fetchWithRefresh('https://example.com/api', {
 		method: 'POST',
-		body: 'original-body',
-		headers: {
-			'content-type': 'text/plain;charset=UTF-8',
-			'content-length': '999',
-		},
+		body,
+		duplex: 'half',
 	});
 
-	const formData = new FormData();
-	formData.append('field', 'value');
-
-	await fetchWithRefresh(request, {
-		body: formData,
-	});
-
-	t.true(firstContentType.startsWith('multipart/form-data; boundary='));
-	t.is(firstContentLength, null);
+	t.is(response.status, 401);
+	t.is(callCount, 1);
+	t.deepEqual(bodies, ['async-iterable-body']);
 });
 
-test('Request body overrides strip inherited body headers on retry', async t => {
-	let callCount = 0;
-	let retryContentType;
+test('Request body overrides preserve inherited body headers on the first attempt', async t => {
+	let requestCount = 0;
+	const contentTypes = [];
+	const contentLengths = [];
 
-	const mockFetch = async (urlOrRequest, options = {}) => {
-		callCount++;
-		const request = new Request(urlOrRequest, options);
-
-		if (callCount === 2) {
-			retryContentType = request.headers.get('content-type');
-		}
-
-		return new Response(null, {status: callCount === 1 ? 401 : 200});
-	};
+	const mockFetch = createRecordedResponseFetch({
+		onRequest(request, callCount) {
+			requestCount = callCount;
+			contentTypes.push(request.headers.get('content-type'));
+			contentLengths.push(request.headers.get('content-length'));
+		},
+	});
 
 	const fetchWithRefresh = withTokenRefresh(mockFetch, {
 		async refreshToken() {
@@ -716,16 +733,46 @@ test('Request body overrides strip inherited body headers on retry', async t => 
 		},
 	});
 
-	const formData = new FormData();
-	formData.append('field', 'value');
+	const request = createBodyOverrideRequest({
+		'content-type': 'text/plain;charset=UTF-8',
+		'content-length': '999',
+	});
 
-	const request = new Request('https://example.com/api', {
-		method: 'POST',
-		body: 'original-body',
-		headers: {
-			'content-type': 'text/plain;charset=UTF-8',
-			'content-length': '999',
+	const formData = createFormDataBody();
+
+	const response = await fetchWithRefresh(request, {
+		body: formData,
+	});
+
+	t.is(response.status, 200);
+	t.is(requestCount, 2);
+	t.deepEqual(contentTypes, ['text/plain;charset=UTF-8', 'text/plain;charset=UTF-8']);
+	t.deepEqual(contentLengths, ['999', '999']);
+});
+
+test('Request body overrides preserve explicit Request body headers on retry', async t => {
+	let retryContentType;
+	let retryContentLength;
+
+	const mockFetch = createRecordedResponseFetch({
+		onRequest(request, callCount) {
+			if (callCount === 2) {
+				retryContentType = request.headers.get('content-type');
+				retryContentLength = request.headers.get('content-length');
+			}
 		},
+	});
+
+	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+		async refreshToken() {
+			return 'new-token';
+		},
+	});
+
+	const formData = createFormDataBody();
+	const request = createBodyOverrideRequest({
+		'content-type': 'text/plain;charset=UTF-8',
+		'content-length': '999',
 	});
 
 	const response = await fetchWithRefresh(request, {
@@ -733,7 +780,264 @@ test('Request body overrides strip inherited body headers on retry', async t => 
 	});
 
 	t.is(response.status, 200);
-	t.true(retryContentType.startsWith('multipart/form-data; boundary='));
+	t.is(retryContentType, 'text/plain;charset=UTF-8');
+	t.is(retryContentLength, '999');
+});
+
+test('Request body overrides preserve explicit replacement body headers and non-body Request headers on retry', async t => {
+	let retryRequest;
+
+	const mockFetch = createRecordedResponseFetch({
+		onRequest(request, callCount) {
+			if (callCount === 2) {
+				retryRequest = request;
+			}
+		},
+	});
+
+	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+		async refreshToken() {
+			return 'new-token';
+		},
+	});
+
+	const request = createBodyOverrideRequest({
+		'content-type': 'text/plain;charset=UTF-8',
+		'content-language': 'en',
+		'content-length': '999',
+		'x-request': 'yes',
+	});
+
+	const response = await fetchWithRefresh(request, {
+		body: 'replacement-body',
+		headers: {
+			'content-type': 'application/custom',
+			'content-language': 'de',
+			'content-length': '16',
+			'x-call': 'yes',
+		},
+	});
+
+	t.is(response.status, 200);
+	t.is(retryRequest.headers.get('authorization'), 'Bearer new-token');
+	t.is(retryRequest.headers.get('content-type'), 'application/custom');
+	t.is(retryRequest.headers.get('content-language'), 'de');
+	t.is(retryRequest.headers.get('content-length'), '16');
+	t.is(retryRequest.headers.get('x-request'), 'yes');
+	t.is(retryRequest.headers.get('x-call'), 'yes');
+});
+
+test('Request body overrides preserve explicit Request body headers on retry when no per-call headers are provided', async t => {
+	let retryRequest;
+
+	const mockFetch = createRecordedResponseFetch({
+		onRequest(request, callCount) {
+			if (callCount === 2) {
+				retryRequest = request;
+			}
+		},
+	});
+
+	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+		async refreshToken() {
+			return 'new-token';
+		},
+	});
+
+	const request = createBodyOverrideRequest({
+		'content-type': 'application/json',
+		'content-language': 'fr',
+		'content-location': '/payload',
+		'content-encoding': 'br',
+		'x-request': 'yes',
+	});
+
+	const response = await fetchWithRefresh(request, {
+		body: 'replacement-body',
+	});
+
+	t.is(response.status, 200);
+	t.is(retryRequest.headers.get('authorization'), 'Bearer new-token');
+	t.is(retryRequest.headers.get('content-type'), 'application/json');
+	t.is(retryRequest.headers.get('content-language'), 'fr');
+	t.is(retryRequest.headers.get('content-location'), '/payload');
+	t.is(retryRequest.headers.get('content-encoding'), 'br');
+	t.is(retryRequest.headers.get('x-request'), 'yes');
+});
+
+test('Request body overrides preserve outer withHeaders body defaults across every attempt when the original Request has no body headers', async t => {
+	const contentTypes = [];
+	const contentLanguages = [];
+	const contentLengths = [];
+	const defaultHeaders = [];
+
+	const mockFetch = createRecordedResponseFetch({
+		onRequest(request) {
+			contentTypes.push(request.headers.get('content-type'));
+			contentLanguages.push(request.headers.get('content-language'));
+			contentLengths.push(request.headers.get('content-length'));
+			defaultHeaders.push(request.headers.get('x-default'));
+		},
+	});
+
+	const fetchWithRefresh = withHeaders(withTokenRefresh(mockFetch, {
+		async refreshToken() {
+			return 'new-token';
+		},
+	}), {
+		'content-type': 'application/default',
+		'content-language': 'fr',
+		'content-length': '123',
+		'x-default': 'yes',
+	});
+	const request = createBodyOverrideRequest(undefined, new Uint8Array([1, 2, 3]));
+
+	const response = await fetchWithRefresh(request, {
+		body: 'replacement-body',
+	});
+
+	t.is(response.status, 200);
+	t.deepEqual(contentTypes, ['application/default', 'application/default']);
+	t.deepEqual(contentLanguages, ['fr', 'fr']);
+	t.deepEqual(contentLengths, ['123', '123']);
+	t.deepEqual(defaultHeaders, ['yes', 'yes']);
+});
+
+test('Request body overrides preserve explicit replacement body headers over outer withHeaders defaults across every attempt', async t => {
+	const contentTypes = [];
+	const contentLanguages = [];
+	const contentLengths = [];
+	const defaultHeaders = [];
+
+	const mockFetch = createRecordedResponseFetch({
+		onRequest(request) {
+			contentTypes.push(request.headers.get('content-type'));
+			contentLanguages.push(request.headers.get('content-language'));
+			contentLengths.push(request.headers.get('content-length'));
+			defaultHeaders.push(request.headers.get('x-default'));
+		},
+	});
+
+	const fetchWithRefresh = withHeaders(withTokenRefresh(mockFetch, {
+		async refreshToken() {
+			return 'new-token';
+		},
+	}), {
+		'content-type': 'application/default',
+		'content-language': 'fr',
+		'content-length': '123',
+		'x-default': 'yes',
+	});
+	const request = createBodyOverrideRequest(undefined, new Uint8Array([1, 2, 3]));
+
+	const response = await fetchWithRefresh(request, {
+		body: 'replacement-body',
+		headers: {
+			'content-type': 'application/custom',
+			'content-language': 'de',
+			'content-length': '16',
+		},
+	});
+
+	t.is(response.status, 200);
+	t.deepEqual(contentTypes, ['application/custom', 'application/custom']);
+	t.deepEqual(contentLanguages, ['de', 'de']);
+	t.deepEqual(contentLengths, ['16', '16']);
+	t.deepEqual(defaultHeaders, ['yes', 'yes']);
+});
+
+test('Request body overrides preserve explicit replacement body headers over nested withHeaders defaults across every attempt', async t => {
+	const contentTypes = [];
+	const contentLanguages = [];
+	const contentLengths = [];
+	const outerDefaultHeaders = [];
+	const innerDefaultHeaders = [];
+
+	const mockFetch = createRecordedResponseFetch({
+		onRequest(request) {
+			contentTypes.push(request.headers.get('content-type'));
+			contentLanguages.push(request.headers.get('content-language'));
+			contentLengths.push(request.headers.get('content-length'));
+			outerDefaultHeaders.push(request.headers.get('x-outer-default'));
+			innerDefaultHeaders.push(request.headers.get('x-inner-default'));
+		},
+	});
+
+	const fetchWithRefresh = withHeaders(withHeaders(withTokenRefresh(mockFetch, {
+		async refreshToken() {
+			return 'new-token';
+		},
+	}), {
+		'Content-Type': 'application/inner-default',
+		'Content-Language': 'nb',
+		'Content-Length': '321',
+		'X-Inner-Default': 'yes',
+	}), {
+		'content-type': 'application/outer-default',
+		'content-language': 'fr',
+		'content-length': '123',
+		'x-outer-default': 'yes',
+	});
+	const request = createBodyOverrideRequest(undefined, new Uint8Array([1, 2, 3]));
+
+	const response = await fetchWithRefresh(request, {
+		body: 'replacement-body',
+		headers: {
+			'content-type': 'application/custom',
+			'content-language': 'de',
+			'content-length': '16',
+		},
+	});
+
+	t.is(response.status, 200);
+	t.deepEqual(contentTypes, ['application/custom', 'application/custom']);
+	t.deepEqual(contentLanguages, ['de', 'de']);
+	t.deepEqual(contentLengths, ['16', '16']);
+	t.deepEqual(outerDefaultHeaders, ['yes', 'yes']);
+	t.deepEqual(innerDefaultHeaders, ['yes', 'yes']);
+});
+
+test('Request body overrides preserve explicit Request body headers across retry through nested withHeaders wrappers', async t => {
+	const contentTypes = [];
+	const contentLanguages = [];
+	const contentLengths = [];
+	const outerDefaultHeaders = [];
+	const innerDefaultHeaders = [];
+
+	const mockFetch = createRecordedResponseFetch({
+		onRequest(request) {
+			contentTypes.push(request.headers.get('content-type'));
+			contentLanguages.push(request.headers.get('content-language'));
+			contentLengths.push(request.headers.get('content-length'));
+			outerDefaultHeaders.push(request.headers.get('x-outer-default'));
+			innerDefaultHeaders.push(request.headers.get('x-inner-default'));
+		},
+	});
+
+	const fetchWithRefresh = withHeaders(withHeaders(withTokenRefresh(mockFetch, {
+		async refreshToken() {
+			return 'new-token';
+		},
+	}), {
+		'x-inner-default': 'yes',
+	}), {
+		'x-outer-default': 'yes',
+	});
+	const formData = createFormDataBody();
+	const request = createBodyOverrideRequest({
+		'content-type': 'text/plain;charset=UTF-8',
+		'content-language': 'fr',
+		'content-length': '999',
+	});
+
+	const response = await fetchWithRefresh(request, {body: formData});
+
+	t.is(response.status, 200);
+	t.deepEqual(contentTypes, ['text/plain;charset=UTF-8', 'text/plain;charset=UTF-8']);
+	t.deepEqual(contentLanguages, ['fr', 'fr']);
+	t.deepEqual(contentLengths, ['999', '999']);
+	t.deepEqual(outerDefaultHeaders, ['yes', 'yes']);
+	t.deepEqual(innerDefaultHeaders, ['yes', 'yes']);
 });
 
 test('cancels the unused tee branch when no retry happens', async t => {
@@ -1617,6 +1921,106 @@ test('deduplicates mixed-case Authorization header names', async t => {
 	t.is(responseC.status, 200);
 	t.is(refreshCount, 1);
 	t.is(callCount, 6);
+});
+
+test('deduplicates by the effective Authorization header from inner withHeaders defaults', async t => {
+	let refreshCount = 0;
+	let callCount = 0;
+
+	const mockFetch = async (url, options = {}) => {
+		callCount++;
+		const authorization = new Headers(options.headers).get('Authorization');
+		const isRetry = authorization === 'Bearer new-token';
+
+		if (isRetry) {
+			return new Response(null, {status: 200});
+		}
+
+		if (url === '/api/b') {
+			await new Promise(resolve => {
+				setTimeout(resolve, 10);
+			});
+		}
+
+		return new Response(null, {status: 401});
+	};
+
+	const fetchWithRefresh = withTokenRefresh(withHeaders(mockFetch, {
+		Authorization: 'Bearer expired-token',
+	}), {
+		async refreshToken() {
+			refreshCount++;
+			await new Promise(resolve => {
+				setTimeout(resolve, 40);
+			});
+			return 'new-token';
+		},
+	});
+
+	const [responseA, responseB] = await Promise.all([
+		fetchWithRefresh('/api/a'),
+		fetchWithRefresh('/api/b', {
+			headers: {
+				Authorization: 'Bearer expired-token',
+			},
+		}),
+	]);
+
+	t.is(responseA.status, 200);
+	t.is(responseB.status, 200);
+	t.is(refreshCount, 1);
+	t.is(callCount, 4);
+});
+
+test('deduplicates by the effective Authorization header from nested withHeaders defaults', async t => {
+	let refreshCount = 0;
+	let callCount = 0;
+
+	const mockFetch = async (url, options = {}) => {
+		callCount++;
+		const authorization = new Headers(options.headers).get('Authorization');
+		const isRetry = authorization === 'Bearer new-token';
+
+		if (isRetry) {
+			return new Response(null, {status: 200});
+		}
+
+		if (url === '/api/b') {
+			await new Promise(resolve => {
+				setTimeout(resolve, 10);
+			});
+		}
+
+		return new Response(null, {status: 401});
+	};
+
+	const fetchWithRefresh = withTokenRefresh(withHeaders(withHeaders(mockFetch, {
+		Authorization: 'Bearer expired-token',
+	}), {
+		'X-Test': '1',
+	}), {
+		async refreshToken() {
+			refreshCount++;
+			await new Promise(resolve => {
+				setTimeout(resolve, 40);
+			});
+			return 'new-token';
+		},
+	});
+
+	const [responseA, responseB] = await Promise.all([
+		fetchWithRefresh('/api/a'),
+		fetchWithRefresh('/api/b', {
+			headers: {
+				Authorization: 'Bearer expired-token',
+			},
+		}),
+	]);
+
+	t.is(responseA.status, 200);
+	t.is(responseB.status, 200);
+	t.is(refreshCount, 1);
+	t.is(callCount, 4);
 });
 
 test('late anonymous 401s do not reuse a settled refresh across batches', async t => {

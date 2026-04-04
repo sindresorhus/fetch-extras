@@ -1,4 +1,4 @@
-import {copyFetchMetadata, timeoutDurationSymbol} from './utilities.js';
+import {copyFetchMetadata, getFetchSignal, getRequestSignal} from './utilities.js';
 
 export function withRateLimit(fetchFunction, {requestsPerInterval, interval}) {
 	if (!Number.isInteger(requestsPerInterval) || requestsPerInterval < 1) {
@@ -19,18 +19,6 @@ export function withRateLimit(fetchFunction, {requestsPerInterval, interval}) {
 		while (timestamps.length > 0 && timestamps[0] <= cutoff) {
 			timestamps.shift();
 		}
-	};
-
-	const getEffectiveSignal = (urlOrRequest, options) => {
-		const providedSignal = options.signal ?? (urlOrRequest instanceof Request ? urlOrRequest.signal : undefined);
-		const timeoutDuration = fetchFunction[timeoutDurationSymbol];
-		const timeoutSignal = timeoutDuration === undefined ? undefined : AbortSignal.timeout(timeoutDuration);
-
-		if (providedSignal && timeoutSignal) {
-			return AbortSignal.any([providedSignal, timeoutSignal]);
-		}
-
-		return providedSignal ?? timeoutSignal;
 	};
 
 	const clearNextSlotTimeout = () => {
@@ -77,7 +65,7 @@ export function withRateLimit(fetchFunction, {requestsPerInterval, interval}) {
 	};
 
 	const fetchWithRateLimit = async (urlOrRequest, options = {}) => {
-		const signal = getEffectiveSignal(urlOrRequest, options);
+		const signal = getFetchSignal(fetchFunction, getRequestSignal(urlOrRequest, options));
 
 		signal?.throwIfAborted();
 

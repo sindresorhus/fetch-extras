@@ -1,11 +1,13 @@
 import isNetworkError from 'is-network-error';
 import {
-	blockedRequestBodyHeaderNames,
 	copyFetchMetadata,
 	delay,
-	inheritedRequestBodyHeaderNamesSymbol,
+	discardBody,
+	getFetchSignal,
+	getRequestSignal,
+	getRequestReplayHeaders,
+	requestSnapshot,
 	resolveRequestUrl,
-	timeoutDurationSymbol,
 } from './utilities.js';
 
 const defaultRetriableMethods = new Set(['GET', 'HEAD', 'PUT', 'DELETE', 'OPTIONS', 'TRACE']);
@@ -67,59 +69,6 @@ export function withRetry(fetchFunction, options = {}) {
 	const retriableMethods = new Set(methods.map(method => method.toUpperCase()));
 	const retriableStatusCodes = new Set(statusCodes);
 
-	const getRequestHeaders = (request, options) => {
-		const requestHeaders = new Headers(request?.headers);
-		const callHeaders = new Headers(options.headers);
-
-		if (request && options.body !== undefined) {
-			for (const headerName of blockedRequestBodyHeaderNames) {
-				requestHeaders.delete(headerName);
-			}
-
-			for (const headerName of options[inheritedRequestBodyHeaderNamesSymbol] ?? []) {
-				callHeaders.delete(headerName);
-			}
-		}
-
-		for (const [key, value] of callHeaders) {
-			requestHeaders.set(key, value);
-		}
-
-		return requestHeaders;
-	};
-
-	const requestSnapshot = request => ({
-		method: request.method,
-		referrer: request.referrer,
-		referrerPolicy: request.referrerPolicy,
-		mode: request.mode,
-		credentials: request.credentials,
-		cache: request.cache,
-		redirect: request.redirect,
-		integrity: request.integrity,
-		keepalive: request.keepalive,
-		signal: request.signal,
-		duplex: request.duplex,
-		priority: request.priority,
-	});
-
-	const getAttemptSignal = providedSignal => {
-		const timeoutDuration = fetchFunction[timeoutDurationSymbol];
-		const timeoutSignal = timeoutDuration === undefined ? undefined : AbortSignal.timeout(timeoutDuration);
-
-		if (providedSignal) {
-			return timeoutSignal ? AbortSignal.any([providedSignal, timeoutSignal]) : providedSignal;
-		}
-
-		return timeoutSignal;
-	};
-
-	const discardBody = async body => {
-		try {
-			await body?.cancel?.();
-		} catch {}
-	};
-
 	const isNonReplayableBody = body =>
 		body instanceof ReadableStream
 		|| typeof body?.[Symbol.asyncIterator] === 'function';
@@ -146,18 +95,27 @@ export function withRetry(fetchFunction, options = {}) {
 			return fetchFunction(urlOrRequest, fetchOptions);
 		}
 
-		const providedSignal = fetchOptions.signal ?? request?.signal;
-		const baseOptions = request && fetchOptions.body !== undefined
-			? {...fetchOptions, headers: getRequestHeaders(request, fetchOptions)}
+		const attemptSignal = getFetchSignal(fetchFunction, getRequestSignal(urlOrRequest, fetchOptions));
+		const currentOptions = attemptSignal
+			? {...fetchOptions, signal: attemptSignal}
 			: fetchOptions;
-		const requestInput = request && fetchOptions.body !== undefined
+		const retryBaseOptions = request && fetchOptions.body !== undefined
+			? {...fetchOptions, headers: getRequestReplayHeaders(request, fetchOptions)}
+			: currentOptions;
+		const retryRequestInput = request && fetchOptions.body !== undefined
 			? new Request(resolveRequestUrl(fetchFunction, request), {
 				...requestSnapshot(request),
-				headers: new Headers(baseOptions.headers),
+				headers: new Headers(retryBaseOptions.headers),
 			})
 			: urlOrRequest;
-		const attemptSignal = getAttemptSignal(providedSignal);
-		const currentOptions = attemptSignal ? {...baseOptions, signal: attemptSignal} : baseOptions;
+		let retryOptions = retryBaseOptions;
+
+		if (attemptSignal) {
+			retryOptions = retryBaseOptions === fetchOptions
+				? currentOptions
+				: {...retryBaseOptions, signal: attemptSignal};
+		}
+
 		const canRetryBody = !(request?.body && fetchOptions.body === undefined) && !isNonReplayableBody(fetchOptions.body);
 		const maximumAttempts = canRetryBody ? retries : 0;
 
@@ -166,7 +124,10 @@ export function withRetry(fetchFunction, options = {}) {
 			const isLastAttempt = attempt >= maximumAttempts;
 			let response;
 			try {
-				response = await fetchFunction(requestInput, currentOptions);
+				response = await fetchFunction(
+					attempt === 0 ? urlOrRequest : retryRequestInput,
+					attempt === 0 ? currentOptions : retryOptions,
+				);
 			} catch (error) {
 				if (isLastAttempt || !isNetworkError(error)) {
 					throw error;

@@ -2,6 +2,8 @@ export const blockedDefaultHeaderNamesSymbol = Symbol('blockedDefaultHeaderNames
 export const inheritedRequestBodyHeaderNamesSymbol = Symbol('inheritedRequestBodyHeaderNames');
 export const timeoutDurationSymbol = Symbol('timeoutDuration');
 export const resolveRequestUrlSymbol = Symbol('resolveRequestUrl');
+export const resolveAuthorizationHeaderSymbol = Symbol('resolveAuthorizationHeader');
+export const resolveRequestHeadersSymbol = Symbol('resolveRequestHeaders');
 export const requestBodyHeaderNames = [
 	'content-encoding',
 	'content-language',
@@ -115,14 +117,6 @@ export function delay(milliseconds, {signal} = {}) {
 	return new Promise((resolve, reject) => {
 		signal?.throwIfAborted();
 
-		const rejectWithAbortReason = () => {
-			try {
-				signal.throwIfAborted();
-			} catch (error) {
-				reject(error);
-			}
-		};
-
 		const timeout = setTimeout(() => {
 			cleanup();
 			resolve();
@@ -135,7 +129,7 @@ export function delay(milliseconds, {signal} = {}) {
 		const onAbort = () => {
 			clearTimeout(timeout);
 			cleanup();
-			rejectWithAbortReason();
+			reject(signal.reason);
 		};
 
 		signal?.addEventListener('abort', onAbort, {once: true});
@@ -151,10 +145,88 @@ export function resolveRequestUrl(fetchFunction, urlOrRequest) {
 	return url.split('#', 1)[0];
 }
 
+export function deleteHeaders(headers, headerNames) {
+	for (const headerName of headerNames) {
+		headers.delete(headerName);
+	}
+
+	return headers;
+}
+
+export function setHeaders(headers, sourceHeaders) {
+	if (!sourceHeaders) {
+		return headers;
+	}
+
+	for (const [key, value] of new Headers(sourceHeaders)) {
+		headers.set(key, value);
+	}
+
+	return headers;
+}
+
+export function getRequestReplayHeaders(request, options = {}) {
+	const requestHeaders = new Headers(request?.headers);
+	const callHeaders = new Headers(options.headers);
+
+	if (request && options.body !== undefined) {
+		deleteHeaders(callHeaders, options[inheritedRequestBodyHeaderNamesSymbol] ?? []);
+	}
+
+	return setHeaders(requestHeaders, callHeaders);
+}
+
+export function getRequestSignal(urlOrRequest, options = {}) {
+	return options.signal ?? (urlOrRequest instanceof Request ? urlOrRequest.signal : undefined);
+}
+
+export function getTimeoutSignal(timeout, providedSignal) {
+	const timeoutSignal = AbortSignal.timeout(timeout);
+
+	if (providedSignal) {
+		return AbortSignal.any([providedSignal, timeoutSignal]);
+	}
+
+	return timeoutSignal;
+}
+
+export function getFetchSignal(fetchFunction, providedSignal) {
+	const timeoutDuration = fetchFunction[timeoutDurationSymbol];
+
+	if (timeoutDuration === undefined) {
+		return providedSignal;
+	}
+
+	return getTimeoutSignal(timeoutDuration, providedSignal);
+}
+
+export async function discardBody(body) {
+	try {
+		await body?.cancel?.();
+	} catch {}
+}
+
+export function requestSnapshot(request) {
+	return {
+		method: request.method,
+		referrer: request.referrer,
+		referrerPolicy: request.referrerPolicy,
+		mode: request.mode,
+		credentials: request.credentials,
+		cache: request.cache,
+		redirect: request.redirect,
+		integrity: request.integrity,
+		keepalive: request.keepalive,
+		signal: request.signal,
+		duplex: request.duplex,
+		priority: request.priority,
+	};
+}
+
 export function copyFetchMetadata(targetFetch, sourceFetch) {
 	/*
 	Boundary: this only forwards metadata that outer wrappers need to preserve their documented behavior.
-	Right now that is timeoutDurationSymbol and resolveRequestUrlSymbol so wrappers can preserve timeout behavior and URL-based composition semantics through simple wrapper chains.
+	Right now that is timeoutDurationSymbol, resolveRequestUrlSymbol, resolveAuthorizationHeaderSymbol, and resolveRequestHeadersSymbol so wrappers can preserve timeout behavior, URL-based composition semantics, Authorization-scoped refresh deduplication, and effective request-header inspection through simple wrapper chains.
 	Do not expand this into a generic wrapper-introspection channel.
 	*/
 	if (sourceFetch[timeoutDurationSymbol] !== undefined) {
@@ -163,6 +235,14 @@ export function copyFetchMetadata(targetFetch, sourceFetch) {
 
 	if (targetFetch[resolveRequestUrlSymbol] === undefined && sourceFetch[resolveRequestUrlSymbol] !== undefined) {
 		targetFetch[resolveRequestUrlSymbol] = sourceFetch[resolveRequestUrlSymbol];
+	}
+
+	if (targetFetch[resolveAuthorizationHeaderSymbol] === undefined && sourceFetch[resolveAuthorizationHeaderSymbol] !== undefined) {
+		targetFetch[resolveAuthorizationHeaderSymbol] = sourceFetch[resolveAuthorizationHeaderSymbol];
+	}
+
+	if (targetFetch[resolveRequestHeadersSymbol] === undefined && sourceFetch[resolveRequestHeadersSymbol] !== undefined) {
+		targetFetch[resolveRequestHeadersSymbol] = sourceFetch[resolveRequestHeadersSymbol];
 	}
 
 	return targetFetch;

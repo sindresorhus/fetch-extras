@@ -1089,9 +1089,8 @@ test('withUploadProgress - Request body overrides do not mutate the original Req
 	t.is(await originalRequest.clone().text(), 'request body');
 });
 
-test('withUploadProgress - Request body overrides preserve compatible original Request metadata and drop incompatible keepalive', async t => {
+test('withUploadProgress - Request body overrides preserve compatible original Request metadata and keep keepalive semantics', async t => {
 	let capturedRequest;
-	let mergedRequest;
 	const originalRequest = createUploadRequest({
 		method: 'PATCH',
 		body: 'request body',
@@ -1106,20 +1105,17 @@ test('withUploadProgress - Request body overrides preserve compatible original R
 	});
 	const {fetchWithUploadProgress} = trackUploadProgress(async (urlOrRequest, options) => {
 		capturedRequest = urlOrRequest;
-		mergedRequest = new Request(urlOrRequest, options);
-		await new Response(mergedRequest.body).text();
-		return new Response(null, {status: 200, statusText: 'OK'});
+		const request = new Request(urlOrRequest, options);
+		return new Response(request.url, {status: 200, statusText: 'OK'});
 	});
 
-	await fetchWithUploadProgress(originalRequest, {
+	const error = await t.throwsAsync(fetchWithUploadProgress(originalRequest, {
 		body: createOverrideStream(),
-	});
+	}));
 
-	t.is(mergedRequest.method, originalRequest.method);
-	t.is(mergedRequest.redirect, originalRequest.redirect);
-	t.is(mergedRequest.integrity, originalRequest.integrity);
-	t.false(mergedRequest.keepalive);
-	t.is(mergedRequest.headers.get('x-request'), 'value');
+	t.is(error.name, 'TypeError');
+	t.is(error.message, 'keepalive');
+	t.true(capturedRequest.keepalive);
 	t.is(capturedRequest.mode, originalRequest.mode);
 	t.is(capturedRequest.credentials, originalRequest.credentials);
 	t.is(capturedRequest.cache, originalRequest.cache);

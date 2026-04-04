@@ -504,3 +504,17 @@ test('many concurrent requests all deduplicated', async t => {
 		t.deepEqual(data, {callCount: 1});
 	}
 });
+
+test('relative path strings are deduplicated using the raw string as key', async t => {
+	const mockFetch = createDelayedMockFetch();
+	const deduplicatedFetch = withDeduplication(mockFetch);
+
+	const [response1, response2] = await Promise.all([
+		deduplicatedFetch('/api/users'),
+		deduplicatedFetch('/api/users'),
+	]);
+
+	t.is(mockFetch.callCount, 1);
+	t.deepEqual(await response1.json(), {callCount: 1});
+	t.deepEqual(await response2.json(), {callCount: 1});
+});
