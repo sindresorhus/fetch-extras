@@ -4,6 +4,7 @@ import {withBaseUrl} from '../source/with-base-url.js';
 import {
 	pipeline,
 	withHeaders,
+	withHooks,
 	withHttpError,
 	withJsonBody,
 	withTimeout,
@@ -140,6 +141,38 @@ test('does not retry non-retriable methods by default', async t => {
 	const response = await fetchWithRetry('https://example.com', {method: 'POST'});
 	t.is(response.status, 503);
 	t.is(mockFetch.callCount, 1);
+});
+
+test('withHooks after withRetry reuses the same hooked request across retries', async t => {
+	const mockFetch = createMockFetch([
+		createResponse(503),
+		createResponse(200),
+	]);
+	let beforeRequestCallCount = 0;
+	const fetchWithRetry = pipeline(
+		mockFetch,
+		fetchFunction => withRetry(fetchFunction, {backoff: () => 0}),
+		fetchFunction => withHooks(fetchFunction, {
+			beforeRequest({options}) {
+				beforeRequestCallCount++;
+				return {
+					...options,
+					headers: {
+						...options.headers,
+						'x-request-id': 'static-request-id',
+					},
+				};
+			},
+		}),
+	);
+
+	const response = await fetchWithRetry('https://example.com');
+
+	t.is(response.status, 200);
+	t.is(mockFetch.callCount, 2);
+	t.is(beforeRequestCallCount, 1);
+	t.is(mockFetch.calls[0].options.headers['x-request-id'], 'static-request-id');
+	t.is(mockFetch.calls[1].options.headers['x-request-id'], 'static-request-id');
 });
 
 test('retries POST when added to methods', async t => {

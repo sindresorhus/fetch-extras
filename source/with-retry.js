@@ -71,9 +71,21 @@ export function withRetry(fetchFunction, options = {}) {
 	const retriableMethods = new Set(methods.map(method => method.toUpperCase()));
 	const retriableStatusCodes = new Set(statusCodes);
 
-	const isNonReplayableBody = body =>
-		body instanceof ReadableStream
-		|| typeof body?.[Symbol.asyncIterator] === 'function';
+	function isNonReplayableBody(body) {
+		return body instanceof ReadableStream
+			|| typeof body?.[Symbol.asyncIterator] === 'function';
+	}
+
+	function createRetryInput({request, fetchOptions, retryBaseOptions, urlOrRequest}) {
+		if (!(request && fetchOptions.body !== undefined)) {
+			return urlOrRequest;
+		}
+
+		return new Request(resolveRequestUrl(fetchFunction, request), {
+			...requestSnapshot(request),
+			headers: new Headers(retryBaseOptions.headers),
+		});
+	}
 
 	const getRetryDelay = (response, attemptNumber) => {
 		const retryAfter = parseRetryAfter(response);
@@ -98,6 +110,8 @@ export function withRetry(fetchFunction, options = {}) {
 		}
 
 		const bodyResolvedFetchOptions = resolveRequestBodyOptions(fetchFunction, urlOrRequest, fetchOptions);
+		const canRetryBody = !(request?.body && fetchOptions.body === undefined) && !isNonReplayableBody(bodyResolvedFetchOptions.body);
+		const maximumAttempts = canRetryBody ? retries : 0;
 		const hasResolvedBody = bodyResolvedFetchOptions.body !== undefined;
 		const requestHeaders = hasResolvedBody
 			? resolveRequestHeaders(fetchFunction, urlOrRequest, fetchOptions)
@@ -115,12 +129,12 @@ export function withRetry(fetchFunction, options = {}) {
 		const retryBaseOptions = resolvedHeaders
 			? currentOptionsBase
 			: currentOptions;
-		const retryRequestInput = request && fetchOptions.body !== undefined
-			? new Request(resolveRequestUrl(fetchFunction, request), {
-				...requestSnapshot(request),
-				headers: new Headers(retryBaseOptions.headers),
-			})
-			: urlOrRequest;
+		const retryRequestInput = createRetryInput({
+			request,
+			fetchOptions,
+			retryBaseOptions,
+			urlOrRequest,
+		});
 		let retryOptions = retryBaseOptions;
 
 		if (attemptSignal) {
@@ -129,17 +143,15 @@ export function withRetry(fetchFunction, options = {}) {
 				: {...retryBaseOptions, signal: attemptSignal};
 		}
 
-		const canRetryBody = !(request?.body && fetchOptions.body === undefined) && !isNonReplayableBody(bodyResolvedFetchOptions.body);
-		const maximumAttempts = canRetryBody ? retries : 0;
-
 		/* eslint-disable no-await-in-loop */
 		for (let attempt = 0; attempt <= maximumAttempts; attempt++) {
+			const attemptOptions = attempt === 0 ? currentOptions : retryOptions;
 			const isLastAttempt = attempt >= maximumAttempts;
 			let response;
 			try {
 				response = await fetchFunction(
 					attempt === 0 ? urlOrRequest : retryRequestInput,
-					attempt === 0 ? currentOptions : retryOptions,
+					attemptOptions,
 				);
 			} catch (error) {
 				if (isLastAttempt || !isNetworkError(error)) {

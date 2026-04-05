@@ -4,6 +4,7 @@ import {
 	withCache,
 	withDeduplication,
 	withHeaders,
+	withHooks,
 	withHttpError,
 	withJsonBody,
 	withRateLimit,
@@ -157,3 +158,62 @@ void wrappedCustomJsonFetchResponse;
 void wrappedHeadersOnlyFetchResponse;
 void wrappedReadonlyBodyFetchResponse;
 void wrappedSingleArgumentFetchResponse;
+
+// WithHooks
+const fetchWithHooks = withHooks(fetch, {
+	beforeRequest({url, options}) {
+		void url;
+		void options;
+	},
+	afterResponse({url, options, response}) {
+		void url;
+		void options;
+		void response;
+	},
+});
+const hooksResponse: Promise<Response> = fetchWithHooks('/api');
+void hooksResponse;
+
+// WithHooks in pipeline
+const hooksPipelineFetch = pipeline(
+	fetch,
+	fetchFunction => withBaseUrl(fetchFunction, 'https://api.example.com'),
+	fetchFunction => withHooks(fetchFunction, {
+		beforeRequest({url, options}) {
+			return {...options, headers: {'X-Request-ID': url}};
+		},
+		afterResponse({response}) {
+			return response;
+		},
+	}),
+	withHttpError,
+);
+const hooksPipelineResponse: Promise<Response> = hooksPipelineFetch('/users');
+void hooksPipelineResponse;
+
+// WithHooks with no options
+const fetchWithNoHooks = withHooks(fetch);
+const noHooksResponse: Promise<Response> = fetchWithNoHooks('/api');
+void noHooksResponse;
+
+const customHooksFetch = async (input: RequestInfo | URL, init?: {readonly headers?: HeadersInit}): Promise<Response & {readonly custom: true}> => {
+	void input;
+	void init;
+	return new Response() as Response & {readonly custom: true};
+};
+
+const wrappedCustomHooksFetch = withHooks(customHooksFetch, {
+	beforeRequest({options}) {
+		return {
+			...options,
+			headers: {'x-test': '1'},
+		};
+	},
+	afterResponse({response}) {
+		return response;
+	},
+});
+const wrappedCustomHooksFetchResponse: Promise<Response & {readonly custom: true}> = wrappedCustomHooksFetch('/custom', {headers: {'x-test': '1'}});
+// @ts-expect-error Wrapped fetch should not gain unrelated RequestInit fields.
+void wrappedCustomHooksFetch('/custom', {method: 'POST'});
+void wrappedCustomHooksFetchResponse;

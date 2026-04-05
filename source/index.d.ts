@@ -11,6 +11,7 @@ export {withRateLimit} from './with-rate-limit.js';
 export {withCache} from './with-cache.js';
 export {withDeduplication} from './with-deduplication.js';
 export {withRetry} from './with-retry.js';
+export {withHooks} from './with-hooks.js';
 export {
 	paginate,
 	type PaginationOptions,

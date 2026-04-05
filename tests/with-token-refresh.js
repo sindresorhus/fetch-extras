@@ -6,6 +6,7 @@ import {
 	HttpError,
 	withBaseUrl,
 	withHeaders,
+	withHooks,
 	withJsonBody,
 	withUploadProgress,
 	withTimeout,
@@ -2087,6 +2088,46 @@ test('withTimeout outside withTokenRefresh rejects on refresh timeout', async t 
 
 	const error = await t.throwsAsync(fetchWithRefresh('/api/users'));
 	t.is(error.name, 'TimeoutError');
+});
+
+test('withHooks outside withTokenRefresh does not make Request bodies replayable', async t => {
+	let callCount = 0;
+
+	const mockFetch = async () => {
+		callCount++;
+		return new Response(null, {status: 401});
+	};
+
+	const fetchWithRefresh = withHooks(withTokenRefresh(mockFetch, {
+		async refreshToken() {
+			return 'new-token';
+		},
+	}), {
+		beforeRequest({options}) {
+			return {
+				...options,
+				headers: {
+					...options.headers,
+					'x-request-id': 'request-123',
+				},
+			};
+		},
+	});
+
+	const request = new Request('https://example.com/api', {
+		method: 'POST',
+		headers: {
+			authorization: 'Bearer old-token',
+			'content-type': 'application/json',
+		},
+		body: '{"name":"Alice"}',
+		duplex: 'half',
+	});
+
+	const response = await fetchWithRefresh(request);
+
+	t.is(response.status, 401);
+	t.is(callCount, 1);
 });
 
 test('withTimeout inside withTokenRefresh applies to the refresh wait', async t => {

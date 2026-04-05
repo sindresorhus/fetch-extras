@@ -186,6 +186,12 @@ export function resolveRequestBody(fetchFunction, urlOrRequest, options = {}) {
 	return fetchFunction[resolveRequestBodySymbol]?.(urlOrRequest, options) ?? options.body;
 }
 
+export function getRequestOptions(urlOrRequest, options = {}) {
+	return urlOrRequest instanceof Request
+		? {...requestSnapshot(urlOrRequest), ...options}
+		: {...options};
+}
+
 export function resolveRequestBodyOptions(fetchFunction, urlOrRequest, options = {}) {
 	const body = resolveRequestBody(fetchFunction, urlOrRequest, options);
 	return body === options.body

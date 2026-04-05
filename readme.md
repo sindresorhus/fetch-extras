@@ -58,6 +58,7 @@ The `with*` functions are listed in the recommended wrapping order for use with 
 - [`withUploadProgress`](docs/with-upload-progress.md)
 - [`withRetry`](docs/with-retry.md)
 - [`withTokenRefresh`](docs/with-token-refresh.md)
+- [`withHooks`](docs/with-hooks.md)
 - [`withHttpError`](docs/http-error.md#withhttperrorfetchfunction)
 - [`HttpError`](docs/http-error.md#httperror)
 - [`throwIfHttpError`](docs/http-error.md#throwifhttperrorresponse)
