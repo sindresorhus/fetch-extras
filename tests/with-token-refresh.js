@@ -1,13 +1,16 @@
 import test from 'ava';
 import {
+	pipeline,
 	withTokenRefresh,
 	withHttpError,
 	HttpError,
 	withBaseUrl,
 	withHeaders,
+	withJsonBody,
 	withUploadProgress,
 	withTimeout,
 } from '../source/index.js';
+import {resolveRequestBodySymbol} from '../source/utilities.js';
 
 const createMockFetch = ({initialStatus = 401, retryStatus = 200} = {}) => {
 	let callCount = 0;
@@ -1038,6 +1041,395 @@ test('Request body overrides preserve explicit Request body headers across retry
 	t.deepEqual(contentLengths, ['999', '999']);
 	t.deepEqual(outerDefaultHeaders, ['yes', 'yes']);
 	t.deepEqual(innerDefaultHeaders, ['yes', 'yes']);
+});
+
+test('withJsonBody Request body overrides replace inherited body headers across refresh retry attempts', async t => {
+	const contentTypes = [];
+	const contentLanguages = [];
+
+	const mockFetch = createRecordedResponseFetch({
+		onRequest(request) {
+			contentTypes.push(request.headers.get('content-type'));
+			contentLanguages.push(request.headers.get('content-language'));
+		},
+	});
+
+	const fetchWithRefresh = pipeline(
+		mockFetch,
+		withJsonBody,
+		f => withTokenRefresh(f, {
+			async refreshToken() {
+				return 'new-token';
+			},
+		}),
+	);
+	const request = createBodyOverrideRequest({
+		'content-type': 'text/plain;charset=UTF-8',
+		'content-language': 'en',
+	});
+
+	const response = await fetchWithRefresh(request, {body: {name: 'Alice'}});
+
+	t.is(response.status, 200);
+	t.deepEqual(contentTypes, ['application/json', 'application/json']);
+	t.deepEqual(contentLanguages, [null, null]);
+});
+
+test('withJsonBody Request body overrides drop Blob-derived Content-Type across refresh retry attempts', async t => {
+	const contentTypes = [];
+
+	const mockFetch = createRecordedResponseFetch({
+		onRequest(request) {
+			contentTypes.push(request.headers.get('content-type'));
+		},
+	});
+
+	const fetchWithRefresh = pipeline(
+		mockFetch,
+		withJsonBody,
+		f => withTokenRefresh(f, {
+			async refreshToken() {
+				return 'new-token';
+			},
+		}),
+	);
+	const request = createBodyOverrideRequest({
+		'content-type': 'image/png',
+	});
+
+	const response = await fetchWithRefresh(request, {body: {name: 'Alice'}});
+
+	t.is(response.status, 200);
+	t.deepEqual(contentTypes, ['application/json', 'application/json']);
+});
+
+test('withJsonBody Request body overrides preserve withHeaders Content-Type defaults across refresh retry attempts', async t => {
+	const contentTypes = [];
+
+	const mockFetch = createRecordedResponseFetch({
+		onRequest(request) {
+			contentTypes.push(request.headers.get('content-type'));
+		},
+	});
+
+	const fetchWithRefresh = pipeline(
+		mockFetch,
+		f => withHeaders(f, {'content-type': 'application/vnd.api+json'}),
+		withJsonBody,
+		f => withTokenRefresh(f, {
+			async refreshToken() {
+				return 'new-token';
+			},
+		}),
+	);
+	const request = createBodyOverrideRequest({
+		'content-type': 'text/plain;charset=UTF-8',
+		'content-language': 'en',
+	});
+
+	const response = await fetchWithRefresh(request, {body: {name: 'Alice'}});
+
+	t.is(response.status, 200);
+	t.deepEqual(contentTypes, ['application/vnd.api+json', 'application/vnd.api+json']);
+});
+
+test('withJsonBody Request body overrides preserve explicit per-call Content-Type across refresh retry attempts', async t => {
+	const contentTypes = [];
+	const requestHeaders = [];
+
+	const mockFetch = createRecordedResponseFetch({
+		onRequest(request) {
+			contentTypes.push(request.headers.get('content-type'));
+			requestHeaders.push(request.headers.get('x-request'));
+		},
+	});
+
+	const fetchWithRefresh = pipeline(
+		mockFetch,
+		withJsonBody,
+		f => withTokenRefresh(f, {
+			async refreshToken() {
+				return 'new-token';
+			},
+		}),
+	);
+	const request = createBodyOverrideRequest({
+		'content-type': 'text/plain;charset=UTF-8',
+		'x-request': 'yes',
+	});
+
+	const response = await fetchWithRefresh(request, {
+		body: {name: 'Alice'},
+		headers: {'content-type': 'application/problem+json'},
+	});
+
+	t.is(response.status, 200);
+	t.deepEqual(contentTypes, ['application/problem+json', 'application/problem+json']);
+	t.deepEqual(requestHeaders, ['yes', 'yes']);
+});
+
+test('withJsonBody Request body overrides preserve explicit per-call Content-Type over withHeaders defaults across refresh retry attempts', async t => {
+	const contentTypes = [];
+
+	const mockFetch = createRecordedResponseFetch({
+		onRequest(request) {
+			contentTypes.push(request.headers.get('content-type'));
+		},
+	});
+
+	const fetchWithRefresh = pipeline(
+		mockFetch,
+		f => withHeaders(f, {'content-type': 'application/vnd.api+json'}),
+		withJsonBody,
+		f => withTokenRefresh(f, {
+			async refreshToken() {
+				return 'new-token';
+			},
+		}),
+	);
+	const request = createBodyOverrideRequest({
+		'content-type': 'text/plain;charset=UTF-8',
+	});
+
+	const response = await fetchWithRefresh(request, {
+		body: {name: 'Alice'},
+		headers: {'content-type': 'application/problem+json'},
+	});
+
+	t.is(response.status, 200);
+	t.deepEqual(contentTypes, ['application/problem+json', 'application/problem+json']);
+});
+
+test('withJsonBody Request body overrides preserve explicit Headers Content-Type across refresh retry attempts', async t => {
+	const contentTypes = [];
+
+	const mockFetch = createRecordedResponseFetch({
+		onRequest(request) {
+			contentTypes.push(request.headers.get('content-type'));
+		},
+	});
+
+	const fetchWithRefresh = pipeline(
+		mockFetch,
+		withJsonBody,
+		f => withTokenRefresh(f, {
+			async refreshToken() {
+				return 'new-token';
+			},
+		}),
+	);
+	const request = createBodyOverrideRequest({
+		'content-type': 'text/plain;charset=UTF-8',
+	});
+	const headers = new Headers({'content-type': 'application/merge-patch+json'});
+
+	const response = await fetchWithRefresh(request, {
+		body: {name: 'Alice'},
+		headers,
+	});
+
+	t.is(response.status, 200);
+	t.deepEqual(contentTypes, ['application/merge-patch+json', 'application/merge-patch+json']);
+});
+
+test('withJsonBody Request body overrides preserve tuple Content-Type across refresh retry attempts', async t => {
+	const contentTypes = [];
+
+	const mockFetch = createRecordedResponseFetch({
+		onRequest(request) {
+			contentTypes.push(request.headers.get('content-type'));
+		},
+	});
+
+	const fetchWithRefresh = pipeline(
+		mockFetch,
+		withJsonBody,
+		f => withTokenRefresh(f, {
+			async refreshToken() {
+				return 'new-token';
+			},
+		}),
+	);
+	const request = createBodyOverrideRequest({
+		'content-type': 'text/plain;charset=UTF-8',
+	});
+
+	const response = await fetchWithRefresh(request, {
+		body: {name: 'Alice'},
+		headers: [['content-type', 'application/ld+json']],
+	});
+
+	t.is(response.status, 200);
+	t.deepEqual(contentTypes, ['application/ld+json', 'application/ld+json']);
+});
+
+test('withJsonBody URL inputs preserve JSON Content-Type on the first refresh attempt', async t => {
+	const contentTypes = [];
+	const bodies = [];
+	let callCount = 0;
+	const mockFetch = async (urlOrRequest, options = {}) => {
+		callCount++;
+		const request = new Request(urlOrRequest, options);
+		contentTypes.push(request.headers.get('content-type'));
+		bodies.push(await request.text());
+
+		return new Response(null, {status: callCount === 1 ? 401 : 200});
+	};
+
+	const fetchWithRefresh = pipeline(
+		mockFetch,
+		withJsonBody,
+		f => withTokenRefresh(f, {
+			async refreshToken() {
+				return 'new-token';
+			},
+		}),
+	);
+
+	const response = await fetchWithRefresh('https://example.com/api', {
+		method: 'POST',
+		body: {name: 'Alice'},
+	});
+
+	t.is(response.status, 200);
+	t.deepEqual(contentTypes, ['application/json', 'application/json']);
+	t.deepEqual(bodies, ['{"name":"Alice"}', '{"name":"Alice"}']);
+});
+
+test('custom resolved request bodies are replayed once across refresh retries', async t => {
+	const seenBodies = [];
+	let resolveCount = 0;
+	let callCount = 0;
+	const mockFetch = async (_urlOrRequest, options = {}) => {
+		callCount++;
+		seenBodies.push(options.body);
+		return new Response(null, {status: callCount === 1 ? 401 : 200});
+	};
+
+	mockFetch[resolveRequestBodySymbol] = function (_urlOrRequest, options = {}) {
+		resolveCount++;
+		return `${options.body}:${resolveCount}`;
+	};
+
+	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+		async refreshToken() {
+			return 'new-token';
+		},
+	});
+
+	const response = await fetchWithRefresh('https://example.com', {
+		method: 'POST',
+		body: 'payload',
+	});
+
+	t.is(response.status, 200);
+	t.is(resolveCount, 1);
+	t.deepEqual(seenBodies, [
+		'payload:1',
+		'payload:1',
+	]);
+});
+
+test('custom resolved request bodies are replayed once across refresh retries for Request body overrides', async t => {
+	const seenBodies = [];
+	const seenTraceHeaders = [];
+	let resolveCount = 0;
+	let callCount = 0;
+	const mockFetch = async (urlOrRequest, options = {}) => {
+		callCount++;
+
+		const request = new Request(urlOrRequest, options);
+		seenBodies.push(await request.text());
+		seenTraceHeaders.push(request.headers.get('x-trace-id'));
+
+		return new Response(null, {status: callCount === 1 ? 401 : 200});
+	};
+
+	mockFetch[resolveRequestBodySymbol] = function (_urlOrRequest, options = {}) {
+		resolveCount++;
+		return `${options.body}:${resolveCount}`;
+	};
+
+	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+		async refreshToken() {
+			return 'new-token';
+		},
+	});
+	const request = new Request('https://example.com', {
+		method: 'POST',
+		body: 'original',
+		headers: {'x-trace-id': 'trace-123'},
+	});
+
+	const response = await fetchWithRefresh(request, {body: 'payload'});
+
+	t.is(response.status, 200);
+	t.is(resolveCount, 1);
+	t.deepEqual(seenBodies, [
+		'payload:1',
+		'payload:1',
+	]);
+	t.deepEqual(seenTraceHeaders, [
+		'trace-123',
+		'trace-123',
+	]);
+});
+
+test('custom resolved Request body overrides preserve merged headers across refresh retries', async t => {
+	const seenBodies = [];
+	const seenTraceHeaders = [];
+	const seenRequestHeaders = [];
+	let resolveCount = 0;
+	let callCount = 0;
+	const mockFetch = async (urlOrRequest, options = {}) => {
+		callCount++;
+
+		const request = new Request(urlOrRequest, options);
+		seenBodies.push(await request.text());
+		seenTraceHeaders.push(request.headers.get('x-trace-id'));
+		seenRequestHeaders.push(request.headers.get('x-request'));
+
+		return new Response(null, {status: callCount === 1 ? 401 : 200});
+	};
+
+	mockFetch[resolveRequestBodySymbol] = function (_urlOrRequest, options = {}) {
+		resolveCount++;
+		return `${options.body}:${resolveCount}`;
+	};
+
+	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+		async refreshToken() {
+			return 'new-token';
+		},
+	});
+	const request = new Request('https://example.com', {
+		method: 'POST',
+		body: 'original',
+		headers: {
+			'x-trace-id': 'trace-123',
+			'x-request': 'request-value',
+		},
+	});
+
+	const response = await fetchWithRefresh(request, {
+		body: 'payload',
+		headers: {'x-request': 'override-value'},
+	});
+
+	t.is(response.status, 200);
+	t.is(resolveCount, 1);
+	t.deepEqual(seenBodies, [
+		'payload:1',
+		'payload:1',
+	]);
+	t.deepEqual(seenTraceHeaders, [
+		'trace-123',
+		'trace-123',
+	]);
+	t.deepEqual(seenRequestHeaders, [
+		'override-value',
+		'override-value',
+	]);
 });
 
 test('cancels the unused tee branch when no retry happens', async t => {

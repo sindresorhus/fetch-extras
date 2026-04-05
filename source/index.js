@@ -3,6 +3,7 @@ export {withTimeout} from './with-timeout.js';
 export {withBaseUrl} from './with-base-url.js';
 export {withSearchParameters} from './with-search-parameters.js';
 export {withHeaders} from './with-headers.js';
+export {withJsonBody} from './with-json-body.js';
 export {withDownloadProgress} from './with-download-progress.js';
 export {withUploadProgress} from './with-upload-progress.js';
 export {withTokenRefresh} from './with-token-refresh.js';

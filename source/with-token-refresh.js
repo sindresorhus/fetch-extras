@@ -2,8 +2,10 @@ import {
 	copyFetchMetadata,
 	discardBody,
 	getFetchSignal,
-	getRequestReplayHeaders,
 	getRequestSignal,
+	hasHeaders,
+	resolveRequestBodyOptions,
+	resolveRequestHeaders,
 	resolveAuthorizationHeaderSymbol,
 } from './utilities.js';
 
@@ -118,21 +120,23 @@ export function withTokenRefresh(fetchFunction, {refreshToken}) {
 		const request = urlOrRequest instanceof Request
 			? urlOrRequest
 			: undefined;
+		const bodyResolvedOptions = resolveRequestBodyOptions(fetchFunction, urlOrRequest, options);
 		const signal = getFetchSignal(fetchFunction, getRequestSignal(urlOrRequest, options));
-		const requestHeaders = getRequestReplayHeaders(request, options);
-		let initialOptions = request
-			? {...options, headers: requestHeaders}
-			: options;
-		let retryBody = options.body;
+		const requestHeaders = resolveRequestHeaders(fetchFunction, urlOrRequest, options);
+		const hasInitialHeaders = request || options.headers !== undefined || hasHeaders(requestHeaders);
+		let initialOptions = hasInitialHeaders
+			? {...bodyResolvedOptions, headers: requestHeaders}
+			: bodyResolvedOptions;
+		let retryBody = bodyResolvedOptions.body;
 		let hasRetryBody = false;
 
-		if (options.body instanceof ReadableStream) {
+		if (bodyResolvedOptions.body instanceof ReadableStream) {
 			/*
 			`options.body` is an explicit override, so replaying it once is worth the memory cost for the single retry path.
 			Boundary: outer wrappers only see the initial call into withTokenRefresh, not the internal retry.
 			If callers need per-attempt upload progress, withUploadProgress must be composed inside withTokenRefresh so both sends go through it.
 			*/
-			const [initialBody, clonedBody] = options.body.tee();
+			const [initialBody, clonedBody] = bodyResolvedOptions.body.tee();
 			initialOptions = {...initialOptions, body: initialBody};
 
 			retryBody = clonedBody;
@@ -157,7 +161,7 @@ export function withTokenRefresh(fetchFunction, {refreshToken}) {
 		// Boundary: bare Request bodies are not retried because cloning every Request up front would penalize successful uploads too.
 		if (
 			(request?.body && options.body === undefined)
-			|| isAsyncIterable(options.body)
+			|| isAsyncIterable(bodyResolvedOptions.body)
 		) {
 			return returnResponse(response, retryBody);
 		}
@@ -176,9 +180,7 @@ export function withTokenRefresh(fetchFunction, {refreshToken}) {
 			return returnResponse(response, retryBody);
 		}
 
-		const headers = request && options.body !== undefined
-			? getRequestReplayHeaders(request, options)
-			: new Headers(requestHeaders);
+		const headers = new Headers(requestHeaders);
 
 		// The original 401 response is never exposed once we retry, so release its body before issuing the second request.
 		await discardBody(response.body);
@@ -186,8 +188,8 @@ export function withTokenRefresh(fetchFunction, {refreshToken}) {
 		// Retry state stays minimal: replace only Authorization and rerun the same request shape once.
 		headers.set('Authorization', `Bearer ${token}`);
 		const retryOptions = hasRetryBody
-			? {...options, body: retryBody, headers}
-			: {...options, headers};
+			? {...bodyResolvedOptions, body: retryBody, headers}
+			: {...bodyResolvedOptions, headers};
 		return fetchFunction(urlOrRequest, withSignal(retryOptions, signal));
 	};
 

@@ -50,6 +50,7 @@ The `with*` functions are listed in the recommended wrapping order for use with 
 - [`withBaseUrl`](docs/with-base-url.md)
 - [`withSearchParameters`](docs/with-search-parameters.md)
 - [`withHeaders`](docs/with-headers.md)
+- [`withJsonBody`](docs/with-json-body.md)
 - [`withRateLimit`](docs/with-rate-limit.md)
 - [`withDeduplication`](docs/with-deduplication.md)
 - [`withCache`](docs/with-cache.md)

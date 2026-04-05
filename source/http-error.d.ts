@@ -79,6 +79,6 @@ const response = await fetchWithError('/api'); // Throws HttpError for non-2xx r
 const data = await response.json();
 ```
 */
-export function withHttpError(
-	fetchFunction: typeof fetch
-): typeof fetch;
+export function withHttpError<FetchFunction extends typeof fetch>(
+	fetchFunction: FetchFunction
+): (...arguments_: Parameters<FetchFunction>) => ReturnType<FetchFunction>;

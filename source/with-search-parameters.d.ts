@@ -3,6 +3,8 @@ Returns a wrapped fetch function that includes default search parameters on ever
 
 String URLs and `URL` objects are modified. `Request` objects are passed through unchanged.
 
+Place `withSearchParameters` after `withBaseUrl` in a pipeline so the parameters are appended to the resolved absolute URL.
+
 Can be combined with other `with*` functions.
 
 @param fetchFunction - The fetch function to wrap (usually the global `fetch`).

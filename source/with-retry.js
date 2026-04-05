@@ -5,8 +5,10 @@ import {
 	discardBody,
 	getFetchSignal,
 	getRequestSignal,
-	getRequestReplayHeaders,
+	hasHeaders,
 	requestSnapshot,
+	resolveRequestBodyOptions,
+	resolveRequestHeaders,
 	resolveRequestUrl,
 } from './utilities.js';
 
@@ -95,12 +97,23 @@ export function withRetry(fetchFunction, options = {}) {
 			return fetchFunction(urlOrRequest, fetchOptions);
 		}
 
+		const bodyResolvedFetchOptions = resolveRequestBodyOptions(fetchFunction, urlOrRequest, fetchOptions);
+		const hasResolvedBody = bodyResolvedFetchOptions.body !== undefined;
+		const requestHeaders = hasResolvedBody
+			? resolveRequestHeaders(fetchFunction, urlOrRequest, fetchOptions)
+			: undefined;
+		const resolvedHeaders = requestHeaders && (request || fetchOptions.headers !== undefined || hasHeaders(requestHeaders))
+			? requestHeaders
+			: undefined;
 		const attemptSignal = getFetchSignal(fetchFunction, getRequestSignal(urlOrRequest, fetchOptions));
+		const currentOptionsBase = resolvedHeaders
+			? {...bodyResolvedFetchOptions, headers: resolvedHeaders}
+			: bodyResolvedFetchOptions;
 		const currentOptions = attemptSignal
-			? {...fetchOptions, signal: attemptSignal}
-			: fetchOptions;
-		const retryBaseOptions = request && fetchOptions.body !== undefined
-			? {...fetchOptions, headers: getRequestReplayHeaders(request, fetchOptions)}
+			? {...currentOptionsBase, signal: attemptSignal}
+			: currentOptionsBase;
+		const retryBaseOptions = resolvedHeaders
+			? currentOptionsBase
 			: currentOptions;
 		const retryRequestInput = request && fetchOptions.body !== undefined
 			? new Request(resolveRequestUrl(fetchFunction, request), {
@@ -116,7 +129,7 @@ export function withRetry(fetchFunction, options = {}) {
 				: {...retryBaseOptions, signal: attemptSignal};
 		}
 
-		const canRetryBody = !(request?.body && fetchOptions.body === undefined) && !isNonReplayableBody(fetchOptions.body);
+		const canRetryBody = !(request?.body && fetchOptions.body === undefined) && !isNonReplayableBody(bodyResolvedFetchOptions.body);
 		const maximumAttempts = canRetryBody ? retries : 0;
 
 		/* eslint-disable no-await-in-loop */

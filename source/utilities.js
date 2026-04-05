@@ -4,6 +4,7 @@ export const timeoutDurationSymbol = Symbol('timeoutDuration');
 export const resolveRequestUrlSymbol = Symbol('resolveRequestUrl');
 export const resolveAuthorizationHeaderSymbol = Symbol('resolveAuthorizationHeader');
 export const resolveRequestHeadersSymbol = Symbol('resolveRequestHeaders');
+export const resolveRequestBodySymbol = Symbol('resolveRequestBody');
 export const requestBodyHeaderNames = [
 	'content-encoding',
 	'content-language',
@@ -165,7 +166,8 @@ export function setHeaders(headers, sourceHeaders) {
 	return headers;
 }
 
-export function getRequestReplayHeaders(request, options = {}) {
+export function getRequestReplayHeaders(urlOrRequest, options = {}) {
+	const request = urlOrRequest instanceof Request ? urlOrRequest : undefined;
 	const requestHeaders = new Headers(request?.headers);
 	const callHeaders = new Headers(options.headers);
 
@@ -174,6 +176,25 @@ export function getRequestReplayHeaders(request, options = {}) {
 	}
 
 	return setHeaders(requestHeaders, callHeaders);
+}
+
+export function resolveRequestHeaders(fetchFunction, urlOrRequest, options = {}) {
+	return fetchFunction[resolveRequestHeadersSymbol]?.(urlOrRequest, options) ?? getRequestReplayHeaders(urlOrRequest, options);
+}
+
+export function resolveRequestBody(fetchFunction, urlOrRequest, options = {}) {
+	return fetchFunction[resolveRequestBodySymbol]?.(urlOrRequest, options) ?? options.body;
+}
+
+export function resolveRequestBodyOptions(fetchFunction, urlOrRequest, options = {}) {
+	const body = resolveRequestBody(fetchFunction, urlOrRequest, options);
+	return body === options.body
+		? options
+		: {...options, body};
+}
+
+export function hasHeaders(headers) {
+	return !headers.keys().next().done;
 }
 
 export function getRequestSignal(urlOrRequest, options = {}) {
@@ -226,7 +247,7 @@ export function requestSnapshot(request) {
 export function copyFetchMetadata(targetFetch, sourceFetch) {
 	/*
 	Boundary: this only forwards metadata that outer wrappers need to preserve their documented behavior.
-	Right now that is timeoutDurationSymbol, resolveRequestUrlSymbol, resolveAuthorizationHeaderSymbol, and resolveRequestHeadersSymbol so wrappers can preserve timeout behavior, URL-based composition semantics, Authorization-scoped refresh deduplication, and effective request-header inspection through simple wrapper chains.
+	Right now that is timeoutDurationSymbol, resolveRequestUrlSymbol, resolveAuthorizationHeaderSymbol, resolveRequestHeadersSymbol, and resolveRequestBodySymbol so wrappers can preserve timeout behavior, URL-based composition semantics, Authorization-scoped refresh deduplication, effective request-header inspection, and replayable transformed request bodies through simple wrapper chains.
 	Do not expand this into a generic wrapper-introspection channel.
 	*/
 	if (sourceFetch[timeoutDurationSymbol] !== undefined) {
@@ -243,6 +264,10 @@ export function copyFetchMetadata(targetFetch, sourceFetch) {
 
 	if (targetFetch[resolveRequestHeadersSymbol] === undefined && sourceFetch[resolveRequestHeadersSymbol] !== undefined) {
 		targetFetch[resolveRequestHeadersSymbol] = sourceFetch[resolveRequestHeadersSymbol];
+	}
+
+	if (targetFetch[resolveRequestBodySymbol] === undefined && sourceFetch[resolveRequestBodySymbol] !== undefined) {
+		targetFetch[resolveRequestBodySymbol] = sourceFetch[resolveRequestBodySymbol];
 	}
 
 	return targetFetch;
