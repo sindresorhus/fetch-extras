@@ -5,6 +5,8 @@ export const resolveRequestUrlSymbol = Symbol('resolveRequestUrl');
 export const resolveAuthorizationHeaderSymbol = Symbol('resolveAuthorizationHeader');
 export const resolveRequestHeadersSymbol = Symbol('resolveRequestHeaders');
 export const resolveRequestBodySymbol = Symbol('resolveRequestBody');
+export const waitForConcurrencySlotSymbol = Symbol('waitForConcurrencySlot');
+export const defersConcurrencySlotSymbol = Symbol('defersConcurrencySlot');
 export const requestBodyHeaderNames = [
 	'content-encoding',
 	'content-language',
@@ -44,6 +46,78 @@ export function isByteStream(stream) {
 	} catch {
 		return false;
 	}
+}
+
+export function isImmutableHeaders(headers) {
+	try {
+		headers.set('x-fetch-extras-immutability-check', '1');
+		headers.delete('x-fetch-extras-immutability-check');
+		return false;
+	} catch {
+		return true;
+	}
+}
+
+function freezeResponseHeaders(headers) {
+	Object.defineProperties(headers, {
+		append: {
+			value() {
+				throw new TypeError('immutable');
+			},
+		},
+		delete: {
+			value() {
+				throw new TypeError('immutable');
+			},
+		},
+		set: {
+			value() {
+				throw new TypeError('immutable');
+			},
+		},
+	});
+
+	return headers;
+}
+
+function copyResponseMetadata(targetResponse, sourceResponse, immutableHeaders) {
+	const properties = {
+		url: {
+			value: sourceResponse.url,
+		},
+		type: {
+			value: sourceResponse.type,
+		},
+		redirected: {
+			value: sourceResponse.redirected,
+		},
+		clone: {
+			value() {
+				const clonedResponse = Response.prototype.clone.call(this);
+				copyResponseMetadata(clonedResponse, this, immutableHeaders);
+				return clonedResponse;
+			},
+		},
+	};
+
+	if (immutableHeaders) {
+		freezeResponseHeaders(targetResponse.headers);
+	}
+
+	Object.defineProperties(targetResponse, properties);
+}
+
+export function withResponseMetadata(response, body) {
+	const immutableHeaders = isImmutableHeaders(response.headers);
+	const trackedResponse = new Response(body, {
+		status: response.status,
+		statusText: response.statusText,
+		headers: response.headers,
+	});
+
+	copyResponseMetadata(trackedResponse, response, immutableHeaders);
+
+	return trackedResponse;
 }
 
 export function trackProgress(stream, totalBytes, onProgress) {
@@ -134,6 +208,56 @@ export function delay(milliseconds, {signal} = {}) {
 		};
 
 		signal?.addEventListener('abort', onAbort, {once: true});
+	});
+}
+
+export function enqueueAbortable(queue, {signal, onAbort, onEnqueue} = {}) {
+	return new Promise((resolve, reject) => {
+		let isSettled = false;
+
+		const cleanup = () => {
+			signal?.removeEventListener('abort', abort);
+		};
+
+		const settle = callback => {
+			if (isSettled) {
+				return;
+			}
+
+			isSettled = true;
+			cleanup();
+			callback();
+		};
+
+		const abort = () => {
+			const index = queue.indexOf(entry);
+			if (index !== -1) {
+				queue.splice(index, 1);
+			}
+
+			onAbort?.();
+			settle(() => {
+				reject(signal.reason);
+			});
+		};
+
+		const entry = {
+			signal,
+			resolve(value) {
+				settle(() => {
+					resolve(value);
+				});
+			},
+			reject(error) {
+				settle(() => {
+					reject(error);
+				});
+			},
+		};
+
+		signal?.addEventListener('abort', abort, {once: true});
+		queue.push(entry);
+		onEnqueue?.();
 	});
 }
 

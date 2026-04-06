@@ -1,5 +1,11 @@
 import test from 'ava';
-import {withHeaders, withRateLimit, withTimeout} from '../source/index.js';
+import {
+	withConcurrency,
+	withHeaders,
+	withRateLimit,
+	withTimeout,
+} from '../source/index.js';
+import {waitForConcurrencySlotSymbol} from '../source/utilities.js';
 
 const rateLimitTest = test.serial;
 const sleep = async milliseconds => new Promise(resolve => {
@@ -199,6 +205,81 @@ rateLimitTest('aborted request does not consume a rate limit slot', async t => {
 
 	await sleep(250);
 	await expectImmediate(t, limitedFetch, '/c');
+});
+
+rateLimitTest('aborted deferred concurrency waits do not consume a rate-limit slot', async t => {
+	const mockFetch = async url => {
+		if (url === '/a') {
+			await sleep(100);
+		}
+
+		return {ok: true, status: 200, url};
+	};
+
+	const limitedFetch = withConcurrency(
+		withRateLimit(mockFetch, {requestsPerInterval: 2, interval: 1000}),
+		{maxConcurrentRequests: 1},
+	);
+
+	const first = limitedFetch('/a');
+
+	const controller = new AbortController();
+	const abortedPromise = limitedFetch('/b', {signal: controller.signal});
+	setTimeout(() => {
+		controller.abort();
+	}, 20);
+
+	await t.throwsAsync(abortedPromise, {name: 'AbortError'});
+	await first;
+	await expectImmediate(t, limitedFetch, '/c');
+});
+
+rateLimitTest('aborting after deferred concurrency slot acquisition does not leak a rate-limit reservation', async t => {
+	const mockFetch = createMockFetch();
+	const limitedFetch = withRateLimit(mockFetch, {requestsPerInterval: 1, interval: 100});
+	const controller = new AbortController();
+
+	const abortedPromise = limitedFetch('/a', {
+		signal: controller.signal,
+		async [waitForConcurrencySlotSymbol]() {
+			controller.abort();
+		},
+	});
+
+	await t.throwsAsync(abortedPromise, {name: 'AbortError'});
+	await expectImmediate(t, limitedFetch, '/b');
+	t.deepEqual(
+		mockFetch.calls.map(call => call.url),
+		['/b'],
+	);
+});
+
+rateLimitTest('deferred concurrency waits still limit actual fetch starts per interval', async t => {
+	const starts = [];
+	const mockFetch = async url => {
+		starts.push({url, time: Date.now()});
+		if (url === '/a') {
+			await sleep(220);
+			return {ok: true, status: 200, url};
+		}
+
+		return {ok: true, status: 200, url};
+	};
+
+	const limitedFetch = withConcurrency(
+		withRateLimit(mockFetch, {requestsPerInterval: 2, interval: 100}),
+		{maxConcurrentRequests: 1},
+	);
+
+	await Promise.all([
+		limitedFetch('/a'),
+		limitedFetch('/b'),
+		limitedFetch('/c'),
+		limitedFetch('/d'),
+	]);
+
+	const laterStarts = starts.slice(1).map(call => call.time);
+	t.true(laterStarts[2] - laterStarts[0] >= 100, `Expected >= 100ms, got ${laterStarts[2] - laterStarts[0]}ms`);
 });
 
 rateLimitTest('already-aborted request does not consume an immediately available rate limit slot', async t => {

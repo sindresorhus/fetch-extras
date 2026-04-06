@@ -1,4 +1,11 @@
-import {copyFetchMetadata, getFetchSignal, getRequestSignal} from './utilities.js';
+import {
+	copyFetchMetadata,
+	defersConcurrencySlotSymbol,
+	enqueueAbortable,
+	getFetchSignal,
+	getRequestSignal,
+	waitForConcurrencySlotSymbol,
+} from './utilities.js';
 
 export function withRateLimit(fetchFunction, {requestsPerInterval, interval}) {
 	if (!Number.isInteger(requestsPerInterval) || requestsPerInterval < 1) {
@@ -9,15 +16,18 @@ export function withRateLimit(fetchFunction, {requestsPerInterval, interval}) {
 		throw new TypeError('`interval` must be a positive finite number.');
 	}
 
-	const timestamps = [];
+	const reservations = [];
 	const queue = [];
 	let nextSlotTimeout;
 	const now = () => performance.now();
 
 	const prune = currentTime => {
 		const cutoff = currentTime - interval;
-		while (timestamps.length > 0 && timestamps[0] <= cutoff) {
-			timestamps.shift();
+		for (let index = reservations.length - 1; index >= 0; index--) {
+			const reservation = reservations[index];
+			if (reservation.timestamp !== undefined && reservation.timestamp <= cutoff) {
+				reservations.splice(index, 1);
+			}
 		}
 	};
 
@@ -49,8 +59,13 @@ export function withRateLimit(fetchFunction, {requestsPerInterval, interval}) {
 				continue;
 			}
 
-			if (timestamps.length >= requestsPerInterval) {
-				const waitTime = Math.max(timestamps[0] + interval - currentTime, 0);
+			if (reservations.length >= requestsPerInterval) {
+				const oldestStartedReservation = reservations.find(reservation => reservation.timestamp !== undefined);
+				if (!oldestStartedReservation) {
+					return;
+				}
+
+				const waitTime = Math.max(oldestStartedReservation.timestamp + interval - currentTime, 0);
 				nextSlotTimeout = setTimeout(() => {
 					nextSlotTimeout = undefined;
 					schedule();
@@ -58,65 +73,54 @@ export function withRateLimit(fetchFunction, {requestsPerInterval, interval}) {
 				return;
 			}
 
-			timestamps.push(currentTime);
+			const reservation = {
+				timestamp: undefined,
+			};
+			reservations.push(reservation);
 			queue.shift();
-			entry.resolve();
+			entry.resolve(reservation);
 		}
+	};
+
+	const releaseReservation = reservation => {
+		const index = reservations.indexOf(reservation);
+		if (index === -1) {
+			return;
+		}
+
+		reservations.splice(index, 1);
+		schedule({force: true});
 	};
 
 	const fetchWithRateLimit = async (urlOrRequest, options = {}) => {
 		const signal = getFetchSignal(fetchFunction, getRequestSignal(urlOrRequest, options));
-
 		signal?.throwIfAborted();
 
-		await new Promise((resolve, reject) => {
-			let isSettled = false;
-
-			const cleanup = () => {
-				signal?.removeEventListener('abort', onAbort);
-			};
-
-			const settle = callback => {
-				if (isSettled) {
-					return;
-				}
-
-				isSettled = true;
-				cleanup();
-				callback();
-			};
-
-			const onAbort = () => {
-				const index = queue.indexOf(entry);
-				if (index !== -1) {
-					queue.splice(index, 1);
-				}
-
-				settle(() => {
-					reject(signal.reason);
-				});
+		const reservation = await enqueueAbortable(queue, {
+			signal,
+			onAbort() {
 				schedule({force: true});
-			};
-
-			const entry = {
-				signal,
-				resolve() {
-					settle(resolve);
-				},
-				reject(error) {
-					settle(() => {
-						reject(error);
-					});
-				},
-			};
-
-			signal?.addEventListener('abort', onAbort, {once: true});
-			queue.push(entry);
-			schedule();
+			},
+			onEnqueue() {
+				schedule();
+			},
 		});
 
-		return fetchFunction(urlOrRequest, signal ? {...options, signal} : options);
+		const resolvedOptions = signal ? {...options, signal} : options;
+		try {
+			await resolvedOptions[waitForConcurrencySlotSymbol]?.();
+			signal?.throwIfAborted();
+		} catch (error) {
+			releaseReservation(reservation);
+			throw error;
+		}
+
+		reservation.timestamp = now();
+		schedule({force: true});
+		return fetchFunction(urlOrRequest, resolvedOptions);
 	};
 
-	return copyFetchMetadata(fetchWithRateLimit, fetchFunction);
+	const wrappedFetch = copyFetchMetadata(fetchWithRateLimit, fetchFunction);
+	wrappedFetch[defersConcurrencySlotSymbol] = true;
+	return wrappedFetch;
 }

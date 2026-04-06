@@ -52,6 +52,7 @@ The `with*` functions are listed in the recommended wrapping order for use with 
 - [`withHeaders`](docs/with-headers.md)
 - [`withJsonBody`](docs/with-json-body.md)
 - [`withRateLimit`](docs/with-rate-limit.md)
+- [`withConcurrency`](docs/with-concurrency.md)
 - [`withDeduplication`](docs/with-deduplication.md)
 - [`withCache`](docs/with-cache.md)
 - [`withDownloadProgress`](docs/with-download-progress.md)
