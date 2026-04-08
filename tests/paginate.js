@@ -1,5 +1,10 @@
 import test from 'ava';
-import {paginate, withHeaders} from 'fetch-extras';
+import {
+	paginate,
+	withHeaders,
+	withJsonBody,
+	withRetry,
+} from 'fetch-extras';
 import parseLinkHeader from '../source/parse-link-header.js';
 
 // Pagination tests - run serially since they modify globalThis.fetch
@@ -184,7 +189,7 @@ const createEmptyResponseUrlRecordedRequestFetch = ({recordHeaders = []} = {}) =
 
 			seenRequests.push(requestRecord);
 
-			return new Response(JSON.stringify([seenRequests.length]), {
+			return Response.json([seenRequests.length], {
 				headers: {
 					'content-type': 'application/json',
 				},
@@ -442,6 +447,71 @@ test.serial('paginate - preserves Request configuration across pages', async t =
 			body: 'page request body',
 		},
 	]);
+});
+
+test.serial('paginate - URL input preserves init.body for withJsonBody on the first request', async t => {
+	const seenRequests = [];
+	const mockFetch = async (input, options) => {
+		const request = input instanceof Request ? input : new Request(input, options);
+		seenRequests.push({
+			url: request.url,
+			body: await request.text(),
+			contentType: request.headers.get('content-type'),
+		});
+
+		return {
+			ok: true,
+			status: 200,
+			url: request.url,
+			headers: {
+				get() {
+					return undefined;
+				},
+			},
+			json: async () => [1],
+		};
+	};
+
+	await paginate.all('https://example.com/api', {
+		method: 'POST',
+		body: {foo: 1},
+		fetchFunction: withJsonBody(mockFetch),
+	});
+
+	t.deepEqual(seenRequests, [{
+		url: 'https://example.com/api',
+		body: '{"foo":1}',
+		contentType: 'application/json',
+	}]);
+});
+
+test.serial('paginate - URL input preserves replayable init.body for withRetry on the first request', async t => {
+	let callCount = 0;
+	const seenBodies = [];
+	const fetchFunction = withRetry(async (input, options) => {
+		const request = input instanceof Request ? input : new Request(input, options);
+		callCount++;
+		seenBodies.push(await request.text());
+
+		return Response.json([1], {
+			status: callCount === 1 ? 503 : 200,
+			headers: {'content-type': 'application/json'},
+		});
+	}, {
+		retries: 1,
+		backoff: () => 0,
+	});
+
+	const items = await paginate.all('https://example.com/api', {
+		method: 'PUT',
+		body: '{"foo":1}',
+		headers: {'content-type': 'application/json'},
+		fetchFunction,
+	});
+
+	t.deepEqual(items, [1]);
+	t.is(callCount, 2);
+	t.deepEqual(seenBodies, ['{"foo":1}', '{"foo":1}']);
 });
 
 test.serial('paginate - drops inherited sensitive state when the next page changes origin', async t => {
@@ -2759,7 +2829,7 @@ test.serial('paginate - handles custom fetch responses with an empty response ur
 		});
 
 		if (callCount === 1) {
-			return new Response(JSON.stringify([1]), {
+			return Response.json([1], {
 				headers: {
 					Link: '<https://evil.example/api?page=2>; rel="next"',
 					'content-type': 'application/json',
@@ -2767,7 +2837,7 @@ test.serial('paginate - handles custom fetch responses with an empty response ur
 			});
 		}
 
-		return new Response(JSON.stringify([2]), {
+		return Response.json([2], {
 			headers: {
 				'content-type': 'application/json',
 			},
@@ -2881,7 +2951,7 @@ test.serial('paginate - handles relative input with an empty response url when t
 			if (callCount === 1) {
 				t.is(url, '/api?page=1');
 
-				return new Response(JSON.stringify([1]), {
+				return Response.json([1], {
 					headers: {
 						Link: '<https://example.com/api?page=2>; rel="next"',
 						'content-type': 'application/json',
@@ -2892,7 +2962,7 @@ test.serial('paginate - handles relative input with an empty response url when t
 			t.true(url instanceof URL);
 			t.is(url.toString(), 'https://example.com/api?page=2');
 
-			return new Response(JSON.stringify([2]), {
+			return Response.json([2], {
 				headers: {
 					'content-type': 'application/json',
 				},

@@ -12,7 +12,7 @@ const createMockFetch = (status = 200) => {
 
 	const mockFetch = async () => {
 		callCount++;
-		return new Response(JSON.stringify({callCount}), {
+		return Response.json({callCount}, {
 			status,
 			headers: {'content-type': 'application/json'},
 		});
@@ -31,7 +31,7 @@ const createDelayedMockFetch = ({delay = 50, status = 200} = {}) => {
 		await new Promise(resolve => {
 			setTimeout(resolve, delay);
 		});
-		return new Response(JSON.stringify({callCount: currentCount}), {
+		return Response.json({callCount: currentCount}, {
 			status,
 			headers: {'content-type': 'application/json'},
 		});

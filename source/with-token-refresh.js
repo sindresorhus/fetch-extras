@@ -29,6 +29,10 @@ export function withTokenRefresh(fetchFunction, {refreshToken}) {
 
 	const withSignal = (options, signal) => signal ? {...options, signal} : options;
 	const isAsyncIterable = value => value !== undefined && !(value instanceof ReadableStream) && typeof value[Symbol.asyncIterator] === 'function';
+	const discardHiddenBodies = async (response, retryBody) => {
+		await discardBody(response?.body);
+		await discardBody(retryBody);
+	};
 
 	const returnResponse = async (response, retryBody) => {
 		await discardBody(retryBody);
@@ -173,7 +177,8 @@ export function withTokenRefresh(fetchFunction, {refreshToken}) {
 		} catch (error) {
 			// Refresh failures fall back to the original 401, but abort-driven failures must still reject.
 			if (signal?.aborted) {
-				await discardBody(retryBody);
+				// The 401 response is also hidden from the caller on this path, so abort cleanup must release both unread bodies.
+				await discardHiddenBodies(response, retryBody);
 				throw error;
 			}
 
@@ -183,7 +188,7 @@ export function withTokenRefresh(fetchFunction, {refreshToken}) {
 		const headers = new Headers(requestHeaders);
 
 		// The original 401 response is never exposed once we retry, so release its body before issuing the second request.
-		await discardBody(response.body);
+		await discardHiddenBodies(response);
 
 		// Retry state stays minimal: replace only Authorization and rerun the same request shape once.
 		headers.set('Authorization', `Bearer ${token}`);

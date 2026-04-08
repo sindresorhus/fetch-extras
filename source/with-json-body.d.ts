@@ -71,6 +71,6 @@ const response = await apiFetch('/users', {
 });
 ```
 */
-export function withJsonBody<FetchFunction extends typeof fetch>(
+export function withJsonBody<FetchFunction extends (input: RequestInfo | URL, ...arguments_: any[]) => Promise<Response>>(
 	fetchFunction: FetchFunction
 ): JsonBodyWrappedFetch<FetchFunction>;

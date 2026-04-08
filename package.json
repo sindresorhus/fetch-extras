@@ -17,10 +17,10 @@
 	},
 	"sideEffects": false,
 	"engines": {
-		"node": ">=18.18"
+		"node": ">=22"
 	},
 	"scripts": {
-		"test": "xo && ava && tsc source/index.d.ts && tsc --noEmit --module node16 --moduleResolution node16 --target es2022 test-d.ts"
+		"test": "xo && ava && tsc source/index.d.ts && tsc --noEmit --module node16 --moduleResolution node16 --target es2024 test-d.ts"
 	},
 	"files": [
 		"source"
@@ -44,8 +44,8 @@
 		"is-network-error": "^1.3.1"
 	},
 	"devDependencies": {
-		"ava": "^6.2.0",
-		"typescript": "^5.7.3",
+		"ava": "^7.0.0",
+		"typescript": "^6.0.2",
 		"xo": "^0.60.0"
 	},
 	"xo": {

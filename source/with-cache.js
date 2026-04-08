@@ -1,4 +1,10 @@
-import {copyFetchMetadata, resolveRequestHeadersSymbol, resolveRequestUrl} from './utilities.js';
+import {
+	copyFetchMetadata,
+	defersFetchStartSymbol,
+	notifyFetchStartSymbol,
+	resolveRequestHeadersSymbol,
+	resolveRequestUrl,
+} from './utilities.js';
 
 const nonInvalidatingMethods = new Set(['HEAD', 'OPTIONS', 'TRACE']);
 
@@ -116,11 +122,24 @@ export function withCache(fetchFunction, {ttl}) {
 			signal?.throwIfAborted();
 
 			const generation = getGeneration(cache, state, url);
-			cache.delete(url);
-
 			return trackPending(resources, url, 'pendingInvalidationCount', async urlState => {
-				urlState.generation = generation + 1;
-				return fetchFunction(urlOrRequest, options);
+				let didInvalidate = false;
+				const invalidate = () => {
+					if (didInvalidate) {
+						return;
+					}
+
+					didInvalidate = true;
+					cache.delete(url);
+					urlState.generation = generation + 1;
+				};
+
+				if (!fetchFunction[defersFetchStartSymbol]) {
+					invalidate();
+					return fetchFunction(urlOrRequest, options);
+				}
+
+				return fetchFunction(urlOrRequest, {...options, [notifyFetchStartSymbol]: invalidate});
 			});
 		}
 

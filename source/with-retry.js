@@ -175,7 +175,15 @@ export function withRetry(fetchFunction, options = {}) {
 				return response;
 			}
 
-			if (!await shouldRetry({response, attemptNumber: attempt + 1, retriesLeft: retries - attempt})) {
+			let shouldRetryResponse;
+			try {
+				shouldRetryResponse = await shouldRetry({response, attemptNumber: attempt + 1, retriesLeft: retries - attempt});
+			} catch (error) {
+				await discardBody(response.body);
+				throw error;
+			}
+
+			if (!shouldRetryResponse) {
 				return response;
 			}
 

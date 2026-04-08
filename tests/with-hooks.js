@@ -5,6 +5,7 @@ import {
 	withBaseUrl,
 	withHeaders,
 	withJsonBody,
+	withTokenRefresh,
 	pipeline,
 } from '../source/index.js';
 import {timeoutDurationSymbol} from '../source/utilities.js';
@@ -314,6 +315,47 @@ test('withTimeout bounds async afterResponse hooks in documented pipeline order'
 	t.is(mockFetch.calls.length, 1);
 });
 
+test('completed hooks remove abort listeners from reused signals', async t => {
+	const mockFetch = createCapturingFetch();
+	const controller = new AbortController();
+	const {signal} = controller;
+	const originalAddEventListener = signal.addEventListener.bind(signal);
+	const originalRemoveEventListener = signal.removeEventListener.bind(signal);
+	const activeAbortListeners = new Set();
+
+	signal.addEventListener = (type, listener, options) => {
+		if (type === 'abort') {
+			activeAbortListeners.add(listener);
+		}
+
+		return originalAddEventListener(type, listener, options);
+	};
+
+	signal.removeEventListener = (type, listener, options) => {
+		if (type === 'abort') {
+			activeAbortListeners.delete(listener);
+		}
+
+		return originalRemoveEventListener(type, listener, options);
+	};
+
+	t.teardown(() => {
+		signal.addEventListener = originalAddEventListener;
+		signal.removeEventListener = originalRemoveEventListener;
+	});
+
+	const fetchWithHooks = withHooks(mockFetch, {
+		async beforeRequest() {
+			await Promise.resolve();
+		},
+	});
+
+	await fetchWithHooks('/api/1', {signal});
+	await fetchWithHooks('/api/2', {signal});
+
+	t.is(activeAbortListeners.size, 0);
+});
+
 test('beforeRequest - works with Request object as input', async t => {
 	const mockFetch = createCapturingFetch();
 	let receivedContext;
@@ -507,4 +549,35 @@ test('beforeRequest spread can clear an inherited Request body by changing metho
 
 	t.is(capturedRequest.method, 'GET');
 	t.is(capturedRequest.body, null);
+});
+
+test('beforeRequest returning inherited Request body options unchanged does not trigger token refresh retry', async t => {
+	let callCount = 0;
+	let refreshCalled = false;
+
+	const fetchWithHooks = withHooks(withTokenRefresh(async () => {
+		callCount++;
+		return new Response(null, {status: 401});
+	}, {
+		async refreshToken() {
+			refreshCalled = true;
+			return 'new-token';
+		},
+	}), {
+		beforeRequest({options}) {
+			return options;
+		},
+	});
+
+	const request = new Request('https://example.com/upload', {
+		method: 'POST',
+		body: 'payload',
+		duplex: 'half',
+	});
+
+	const response = await fetchWithHooks(request);
+
+	t.is(response.status, 401);
+	t.is(callCount, 1);
+	t.false(refreshCalled);
 });

@@ -4,7 +4,7 @@
 
 > Useful utilities for working with [Fetch](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API)
 
-Great for creating tiny custom HTTP clients without a heavy dependency.
+Great for creating tiny custom HTTP clients without a heavy dependency. Fully tree-shakeable.
 
 *For a full-featured HTTP client on top of Fetch, check out my [`ky`](https://github.com/sindresorhus/ky) package.*
 

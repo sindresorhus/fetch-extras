@@ -4,6 +4,8 @@
 
 Wraps a fetch function with timeout functionality.
 
+Use a single `withTimeout()` in a wrapper pipeline. Nested `withTimeout()` wrappers are unsupported and only the outermost documented timeout budget should be relied on.
+
 ## Parameters
 
 - `fetchFunction` (`typeof fetch`) - The fetch function to wrap (usually the global `fetch`).

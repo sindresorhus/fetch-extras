@@ -1,9 +1,11 @@
 import {
 	copyFetchMetadata,
 	defersConcurrencySlotSymbol,
+	defersFetchStartSymbol,
 	enqueueAbortable,
 	getFetchSignal,
 	getRequestSignal,
+	notifyFetchStart,
 	waitForConcurrencySlotSymbol,
 } from './utilities.js';
 
@@ -77,11 +79,15 @@ export function withConcurrency(fetchFunction, {maxConcurrentRequests}) {
 				await acquireSlot();
 			}
 
-			return await fetchFunction(urlOrRequest, signal ? {...resolvedOptions, signal} : resolvedOptions);
+			const fetchOptions = signal ? {...resolvedOptions, signal} : resolvedOptions;
+			notifyFetchStart(fetchFunction, fetchOptions);
+			return await fetchFunction(urlOrRequest, fetchOptions);
 		} finally {
 			releaseSlot?.();
 		}
 	};
 
-	return copyFetchMetadata(fetchWithConcurrency, fetchFunction);
+	const wrappedFetch = copyFetchMetadata(fetchWithConcurrency, fetchFunction);
+	wrappedFetch[defersFetchStartSymbol] = true;
+	return wrappedFetch;
 }

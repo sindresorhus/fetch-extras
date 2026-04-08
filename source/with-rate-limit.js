@@ -1,9 +1,11 @@
 import {
 	copyFetchMetadata,
 	defersConcurrencySlotSymbol,
+	defersFetchStartSymbol,
 	enqueueAbortable,
 	getFetchSignal,
 	getRequestSignal,
+	notifyFetchStart,
 	waitForConcurrencySlotSymbol,
 } from './utilities.js';
 
@@ -117,10 +119,12 @@ export function withRateLimit(fetchFunction, {requestsPerInterval, interval}) {
 
 		reservation.timestamp = now();
 		schedule({force: true});
+		notifyFetchStart(fetchFunction, resolvedOptions);
 		return fetchFunction(urlOrRequest, resolvedOptions);
 	};
 
 	const wrappedFetch = copyFetchMetadata(fetchWithRateLimit, fetchFunction);
 	wrappedFetch[defersConcurrencySlotSymbol] = true;
+	wrappedFetch[defersFetchStartSymbol] = true;
 	return wrappedFetch;
 }

@@ -50,6 +50,22 @@ pipeline(
 	(value: number): string => value.toString(),
 );
 
+const veryLongPipelineResult: string = pipeline(
+	1,
+	(value: number): number => value + 1,
+	(value: number): number => value + 1,
+	(value: number): number => value + 1,
+	(value: number): number => value + 1,
+	(value: number): number => value + 1,
+	(value: number): number => value + 1,
+	(value: number): number => value + 1,
+	(value: number): number => value + 1,
+	(value: number): number => value + 1,
+	(value: number): number => value + 1,
+	(value: number): number => value + 1,
+	(value: number): string => value.toString(),
+);
+
 const apiFetch = pipeline(
 	fetch,
 	fetchFunction => withTimeout(fetchFunction, 5000),
@@ -72,6 +88,7 @@ const readonlySearchParametersResponse: Promise<Response> = fetchWithReadonlySea
 void result;
 void inferredResult;
 void longPipelineResult;
+void veryLongPipelineResult;
 void responsePromise;
 void rateLimitedResponse;
 const deduplicatedFetch = withDeduplication(fetch);

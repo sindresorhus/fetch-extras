@@ -8,7 +8,10 @@ import {
 	withHttpError,
 	pipeline,
 } from '../source/index.js';
-import {inheritedRequestBodyHeaderNamesSymbol} from '../source/utilities.js';
+import {
+	blockedDefaultHeaderNamesSymbol,
+	inheritedRequestBodyHeaderNamesSymbol,
+} from '../source/utilities.js';
 
 const createCapturingFetch = () => {
 	const calls = [];
@@ -125,9 +128,7 @@ test('passes through class instance body unchanged', async t => {
 	const fetchWithJson = withJsonBody(mockFetch);
 
 	class Payload {
-		constructor() {
-			this.name = 'Alice';
-		}
+		name = 'Alice';
 	}
 
 	const body = new Payload();
@@ -161,6 +162,31 @@ test('does not override explicit Content-Type via Headers object', async t => {
 
 	const {options} = mockFetch.calls[0];
 	t.is(options.headers.get('content-type'), 'application/vnd.api+json');
+});
+
+test('drops stale explicit request-body headers when stringifying JSON', async t => {
+	const mockFetch = createCapturingFetch();
+	const fetchWithJson = withJsonBody(mockFetch);
+
+	await fetchWithJson('/api', {
+		method: 'POST',
+		body: {name: 'Alice'},
+		headers: {
+			'Content-Length': '1',
+			'Content-Encoding': 'gzip',
+			'Content-Language': 'en',
+			'Content-Location': '/old',
+			'X-Trace-Id': '123',
+		},
+	});
+
+	const {options} = mockFetch.calls[0];
+	t.is(options.headers.get('content-type'), 'application/json');
+	t.is(options.headers.get('content-length'), null);
+	t.is(options.headers.get('content-encoding'), null);
+	t.is(options.headers.get('content-language'), null);
+	t.is(options.headers.get('content-location'), null);
+	t.is(options.headers.get('x-trace-id'), '123');
 });
 
 test('preserves other options when stringifying body', async t => {
@@ -277,6 +303,26 @@ test('drops inherited Request body headers when overriding a Request body', asyn
 	t.is(options.headers.get('authorization'), 'Bearer token');
 	t.is(options.headers.get('content-type'), 'application/json');
 	t.is(options.headers.get('content-language'), null);
+});
+
+test('preserves blocked default-header markers when overriding a Request body', async t => {
+	const mockFetch = createCapturingFetch();
+	const apiFetch = pipeline(
+		mockFetch,
+		fetchFunction => withHeaders(fetchFunction, {Authorization: 'Bearer token'}),
+		withJsonBody,
+	);
+	const request = new Request('https://example.com/api', {
+		method: 'POST',
+		body: 'original',
+	});
+	request[blockedDefaultHeaderNamesSymbol] = ['authorization'];
+
+	await apiFetch(request, {body: {name: 'Alice'}});
+
+	const {options} = mockFetch.calls[0];
+	t.is(options.headers.get('authorization'), null);
+	t.is(options.headers.get('content-type'), 'application/json');
 });
 
 test('composes with withHeaders in pipeline', async t => {

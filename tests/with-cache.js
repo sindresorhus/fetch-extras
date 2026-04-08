@@ -3,8 +3,12 @@ import {
 	pipeline,
 	withBaseUrl,
 	withCache,
+	withConcurrency,
+	withDeduplication,
 	withHeaders,
 	withSearchParameters,
+	withRateLimit,
+	withTimeout,
 } from '../source/index.js';
 import {blockedDefaultHeaderNamesSymbol, timeoutDurationSymbol} from '../source/utilities.js';
 
@@ -13,7 +17,7 @@ const createMockFetch = (status = 200) => {
 
 	const mockFetch = async () => {
 		callCount++;
-		return new Response(JSON.stringify({callCount}), {
+		return Response.json({callCount}, {
 			status,
 			headers: {'content-type': 'application/json'},
 		});
@@ -177,6 +181,128 @@ test('aborted mutating Request objects do not evict cached GET responses', async
 	const cachedResponse = await cachedFetch('https://example.com/api');
 	t.deepEqual(await cachedResponse.json(), {callCount: 1});
 	t.is(mockFetch.callCount, 1);
+});
+
+test('queued mutating requests that time out before start do not evict cached GET responses', async t => {
+	let getCallCount = 0;
+	let postCallCount = 0;
+	const mockFetch = async (_urlOrRequest, options = {}) => {
+		const method = (options.method ?? 'GET').toUpperCase();
+
+		if (method === 'POST') {
+			postCallCount++;
+			return new Response('mutated');
+		}
+
+		getCallCount++;
+		return Response.json({callCount: getCallCount}, {
+			status: 200,
+			headers: {'content-type': 'application/json'},
+		});
+	};
+
+	const cachedFetch = withCache(
+		withRateLimit(withTimeout(mockFetch, 50), {requestsPerInterval: 1, interval: 200}),
+		{ttl: 60_000},
+	);
+
+	await cachedFetch('https://example.com/api');
+	t.is(getCallCount, 1);
+
+	await t.throwsAsync(
+		cachedFetch('https://example.com/api', {method: 'POST'}),
+		{name: 'TimeoutError'},
+	);
+
+	t.is(postCallCount, 0);
+
+	const cachedResponse = await cachedFetch('https://example.com/api');
+	t.deepEqual(await cachedResponse.json(), {callCount: 1});
+	t.is(getCallCount, 1);
+});
+
+test('queued mutating requests in nested delayed-start wrappers do not evict cached GET responses', async t => {
+	let getCallCount = 0;
+	let postCallCount = 0;
+	const mockFetch = async (_urlOrRequest, options = {}) => {
+		const method = (options.method ?? 'GET').toUpperCase();
+
+		if (method === 'POST') {
+			postCallCount++;
+			return new Response('mutated');
+		}
+
+		getCallCount++;
+		return Response.json({callCount: getCallCount}, {
+			status: 200,
+			headers: {'content-type': 'application/json'},
+		});
+	};
+
+	const cachedFetch = withCache(
+		withConcurrency(
+			withRateLimit(withTimeout(mockFetch, 50), {requestsPerInterval: 1, interval: 200}),
+			{maxConcurrentRequests: 1},
+		),
+		{ttl: 60_000},
+	);
+
+	await cachedFetch('https://example.com/api');
+	t.is(getCallCount, 1);
+
+	await t.throwsAsync(
+		cachedFetch('https://example.com/api', {method: 'POST'}),
+		{name: 'TimeoutError'},
+	);
+
+	t.is(postCallCount, 0);
+
+	const cachedResponse = await cachedFetch('https://example.com/api');
+	t.deepEqual(await cachedResponse.json(), {callCount: 1});
+	t.is(getCallCount, 1);
+});
+
+test('queued mutating requests in the documented delayed-start pipeline do not evict cached GET responses', async t => {
+	let getCallCount = 0;
+	let postCallCount = 0;
+	const mockFetch = async (_urlOrRequest, options = {}) => {
+		const method = (options.method ?? 'GET').toUpperCase();
+
+		if (method === 'POST') {
+			postCallCount++;
+			return new Response('mutated');
+		}
+
+		getCallCount++;
+		return Response.json({callCount: getCallCount}, {
+			status: 200,
+			headers: {'content-type': 'application/json'},
+		});
+	};
+
+	const cachedFetch = withCache(
+		withDeduplication(
+			withConcurrency(
+				withRateLimit(withTimeout(mockFetch, 50), {requestsPerInterval: 1, interval: 200}),
+				{maxConcurrentRequests: 1},
+			),
+		),
+		{ttl: 60_000},
+	);
+
+	await cachedFetch('https://example.com/api');
+	t.is(getCallCount, 1);
+
+	await t.throwsAsync(
+		cachedFetch('https://example.com/api', {method: 'POST'}),
+		{name: 'TimeoutError'},
+	);
+
+	t.is(postCallCount, 0);
+
+	const cachedResponse = await cachedFetch('https://example.com/api');
+	t.deepEqual(await cachedResponse.json(), {callCount: 1});
+	t.is(getCallCount, 1);
 });
 
 test('does not cache non-ok responses', async t => {
@@ -798,7 +924,7 @@ test('fetch rejection does not leave stale cache entry', async t => {
 
 	// Should re-fetch, not serve from cache
 	const response = await cachedFetch('https://example.com/api');
-	t.is(response.ok, true);
+	t.true(response.ok);
 	t.is(callCount, 2);
 });
 
@@ -919,8 +1045,8 @@ test('concurrent identical GET requests both hit the network', async t => {
 
 	// Both fire since the first hasn't resolved to populate the cache yet
 	t.is(mockFetch.callCount, 2);
-	t.is(response1.ok, true);
-	t.is(response2.ok, true);
+	t.true(response1.ok);
+	t.true(response2.ok);
 });
 
 test('older GETs do not repopulate the cache after a successful write', async t => {
@@ -1377,7 +1503,7 @@ test('cache: reload does not replace a cached GET when refresh returns non-ok', 
 	const mockFetch = async () => {
 		callCount++;
 		const status = callCount === 2 ? 500 : 200;
-		return new Response(JSON.stringify({callCount}), {status});
+		return Response.json({callCount}, {status});
 	};
 
 	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
@@ -1400,7 +1526,7 @@ test('Request cache: reload does not replace a cached GET when refresh returns n
 	const mockFetch = async () => {
 		callCount++;
 		const status = callCount === 2 ? 500 : 200;
-		return new Response(JSON.stringify({callCount}), {status});
+		return Response.json({callCount}, {status});
 	};
 
 	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
@@ -1599,7 +1725,7 @@ test('mutation during in-flight GET prevents stale caching', async t => {
 				getResolve = resolve;
 			});
 
-			return new Response(JSON.stringify({stale: true}), {
+			return Response.json({stale: true}, {
 				status: 200,
 				headers: {'content-type': 'application/json'},
 			});
@@ -1609,7 +1735,7 @@ test('mutation during in-flight GET prevents stale caching', async t => {
 			return new Response(null, {status: 200});
 		}
 
-		return new Response(JSON.stringify({fresh: true}), {
+		return Response.json({fresh: true}, {
 			status: 200,
 			headers: {'content-type': 'application/json'},
 		});

@@ -119,6 +119,34 @@ test('cancels the discarded 401 response body before retrying', async t => {
 	t.true(canceled401Body);
 });
 
+test('cancels the original 401 response body when refresh wait is aborted', async t => {
+	let canceled401Body = false;
+	const controller = new AbortController();
+
+	const fetchWithRefresh = withTokenRefresh(async () => new Response(new ReadableStream({
+		cancel() {
+			canceled401Body = true;
+		},
+	}), {status: 401}), {
+		async refreshToken() {
+			await new Promise(resolve => {
+				setTimeout(resolve, 50);
+			});
+			return 'new-token';
+		},
+	});
+
+	const promise = fetchWithRefresh('https://example.com/api', {signal: controller.signal});
+	controller.abort(new DOMException('Aborted during refresh', 'AbortError'));
+
+	await t.throwsAsync(promise, {
+		instanceOf: DOMException,
+		message: 'Aborted during refresh',
+	});
+
+	t.true(canceled401Body);
+});
+
 test('returns original 401 response when refreshToken throws', async t => {
 	const {mockFetch, getCallCount} = createMockFetch({initialStatus: 401});
 

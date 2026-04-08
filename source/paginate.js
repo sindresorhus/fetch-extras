@@ -4,6 +4,8 @@ import {
 	delay,
 	requestBodyHeaderNames,
 	requestSnapshot,
+	resolveRequestHeaders,
+	resolveRequestBodyOptions,
 } from './utilities.js';
 
 const defaultPaginationOptions = {
@@ -165,6 +167,21 @@ const createRequestTemplate = (input, fetchOptions) => {
 	return new Request(input, fetchOptions);
 };
 
+const createResolvedRequestTemplateState = (fetchFunction, input, fetchOptions) => {
+	const resolvedFetchOptions = resolveRequestBodyOptions(fetchFunction, input, fetchOptions);
+	const resolvedHeaders = resolveRequestHeaders(fetchFunction, input, resolvedFetchOptions);
+	const templateFetchOptions = resolvedHeaders === undefined
+		? resolvedFetchOptions
+		: {...resolvedFetchOptions, headers: resolvedHeaders};
+
+	return {
+		requestTemplate: createRequestTemplate(input, templateFetchOptions),
+		fetchOptions: createTemplateFetchOptions(templateFetchOptions),
+	};
+};
+
+const shouldUseRequestTemplateOnFirstRequest = (input, fetchOptions) => input instanceof Request || (absoluteUrl(input) && fetchOptions.body instanceof ReadableStream);
+
 const currentSignal = (requestTemplate, fetchOptions) => fetchOptions.signal ?? requestTemplate?.signal;
 const requestWithoutSensitiveHeaders = request => ({
 	...requestSnapshot(request),
@@ -226,6 +243,10 @@ for await (const item of paginate('https://api.example.com/items')) {
 export async function * paginate(input, options = {}) {
 	const {pagination = {}, fetchFunction = fetch, ...fetchOptions} = options;
 	const paginationOptions = {...defaultPaginationOptions, ...pagination};
+
+	if (!methodCanHaveBody(fetchOptions.method) && Object.hasOwn(fetchOptions, 'body') && fetchOptions.body !== undefined) {
+		throw new TypeError('Request with GET/HEAD method cannot have body.');
+	}
 
 	if (typeof paginationOptions.transform !== 'function') {
 		throw new TypeError('pagination.transform must be a function');
@@ -298,8 +319,7 @@ export async function * paginate(input, options = {}) {
 	const allItems = [];
 	let {countLimit} = paginationOptions;
 	let numberOfRequests = 0;
-	const absoluteInputUrl = input instanceof Request ? undefined : absoluteUrl(input);
-	let requestTemplate = input instanceof Request || ('body' in fetchOptions && absoluteInputUrl) ? createRequestTemplate(input instanceof Request ? input : absoluteInputUrl, fetchOptions) : undefined;
+	let requestTemplate = shouldUseRequestTemplateOnFirstRequest(input, fetchOptions) ? createRequestTemplate(input, fetchOptions) : undefined;
 	let currentUrl = requestTemplate ? new URL(requestTemplate.url) : input;
 	let currentFetchOptions = requestTemplate ? createTemplateFetchOptions(fetchOptions) : normalizeFetchOptions(fetchOptions);
 	let inheritedStateOrigin = absoluteUrl(requestTemplate ? requestTemplate.url : input);
@@ -388,6 +408,13 @@ export async function * paginate(input, options = {}) {
 		}
 
 		const nextRequestUrl = absoluteUrl(nextPageOptions.url ?? currentUrl);
+
+		if (!requestTemplate && nextRequestUrl && Object.hasOwn(currentFetchOptions, 'body') && currentFetchOptions.body !== undefined) {
+			const requestTemplateState = createResolvedRequestTemplateState(fetchFunction, currentUrl, currentFetchOptions);
+			requestTemplate = requestTemplateState.requestTemplate;
+			currentFetchOptions = requestTemplateState.fetchOptions;
+			currentUrl = new URL(requestTemplate.url);
+		}
 
 		if (shouldStripInheritedSensitiveState(inheritedStateOrigin, nextRequestUrl)) {
 			const strippedState = stripInheritedSensitiveState(requestTemplate, currentFetchOptions);

@@ -487,12 +487,12 @@ test('shouldRetry receives correct context for status code retry', async t => {
 
 	t.is(contexts.length, 2);
 
-	t.is(contexts[0].hasError, false);
+	t.false(contexts[0].hasError);
 	t.is(contexts[0].status, 503);
 	t.is(contexts[0].attemptNumber, 1);
 	t.is(contexts[0].retriesLeft, 3);
 
-	t.is(contexts[1].hasError, false);
+	t.false(contexts[1].hasError);
 	t.is(contexts[1].status, 502);
 	t.is(contexts[1].attemptNumber, 2);
 	t.is(contexts[1].retriesLeft, 2);
@@ -1752,6 +1752,33 @@ test('discards intermediate response bodies between retries', async t => {
 	t.is(response.status, 200);
 	t.is(mockFetch.callCount, 3);
 	t.deepEqual(canceledBodies, [503, 503]);
+});
+
+test('discards retried response bodies when shouldRetry throws', async t => {
+	const canceledBodies = [];
+	const response = new Response(new ReadableStream({
+		start(controller) {
+			controller.enqueue(new TextEncoder().encode('data'));
+			controller.close();
+		},
+		cancel() {
+			canceledBodies.push('canceled');
+		},
+	}), {status: 503});
+	const shouldRetryError = new Error('shouldRetry failed');
+	const mockFetch = createMockFetch([response]);
+	const fetchWithRetry = withRetry(mockFetch, {
+		backoff: () => 0,
+		shouldRetry() {
+			throw shouldRetryError;
+		},
+	});
+
+	const error = await t.throwsAsync(fetchWithRetry('https://example.com'));
+
+	t.is(error, shouldRetryError);
+	t.is(mockFetch.callCount, 1);
+	t.deepEqual(canceledBodies, ['canceled']);
 });
 
 test('methods: [] prevents all retries', async t => {

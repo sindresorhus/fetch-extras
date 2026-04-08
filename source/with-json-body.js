@@ -24,10 +24,12 @@ function getRequestForHeaders(urlOrRequest) {
 		return urlOrRequest;
 	}
 
-	return new Request(urlOrRequest.url, {
+	const request = new Request(urlOrRequest.url, {
 		...requestSnapshot(urlOrRequest),
 		headers: deleteHeaders(new Headers(urlOrRequest.headers), blockedRequestBodyHeaderNames),
 	});
+	request[blockedDefaultHeaderNamesSymbol] = urlOrRequest[blockedDefaultHeaderNamesSymbol];
+	return request;
 }
 
 const blockedJsonDefaultHeaderNames = blockedRequestBodyHeaderNames.filter(headerName => headerName !== 'content-type');
@@ -41,6 +43,7 @@ function getJsonHeaders(fetchFunction, urlOrRequest, options) {
 		?? headers.get('content-type');
 
 	deleteHeaders(headers, blockedRequestBodyHeaderNames);
+	deleteHeaders(callHeaders, blockedRequestBodyHeaderNames);
 	deleteHeaders(callHeaders, inheritedHeaderNames);
 	setHeaders(headers, callHeaders);
 

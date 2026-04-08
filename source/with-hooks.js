@@ -10,6 +10,8 @@ import {
 	resolveRequestUrl,
 } from './utilities.js';
 
+const inheritedHookBodies = new WeakSet();
+
 /*
 Design note: `withHooks` is one function rather than separate `withBeforeRequest`/`withAfterResponse` functions (even though the split would make call-site syntax simpler) because the shared call frame lets `afterResponse` naturally see the options as modified by `beforeRequest`. Two separate wrappers could share this via a WeakMap on the Response, but that trades one coupling for a worse one: hidden global state.
 */
@@ -27,11 +29,20 @@ This is the recommended way to add custom logic (logging, metrics, dynamic heade
 */
 export function withHooks(fetchFunction, {beforeRequest, afterResponse} = {}) {
 	const setInheritedHookBody = (options, body) => {
-		Object.defineProperty(options, 'body', {
-			value: body,
-			configurable: true,
-			writable: true,
+		// Hooks should be able to inspect an inherited Request body without turning it into an explicit override when the same object is returned unchanged.
+		inheritedHookBodies.add(options);
+		Object.setPrototypeOf(options, {
+			body,
 		});
+	};
+
+	const getFetchOptions = (urlOrRequest, options, signal) => {
+		// Strip the prototype-only inherited body marker before calling the inner fetch so no-op hooks do not change downstream wrapper semantics.
+		const fetchOptions = inheritedHookBodies.has(options) ? {...options} : options;
+		const requestSignal = getRequestSignal(urlOrRequest, fetchOptions);
+		return requestSignal === signal
+			? fetchOptions
+			: {...fetchOptions, signal};
 	};
 
 	const shouldClearInheritedBody = (request, hookOptions, options) => {
@@ -49,14 +60,23 @@ export function withHooks(fetchFunction, {beforeRequest, afterResponse} = {}) {
 			return callback();
 		}
 
-		return Promise.race([
-			callback(),
-			new Promise((_resolve, reject) => {
-				signal.addEventListener('abort', () => {
-					reject(signal.reason);
-				}, {once: true});
-			}),
-		]);
+		let abort;
+		const abortPromise = new Promise((_resolve, reject) => {
+			abort = () => {
+				reject(signal.reason);
+			};
+
+			signal.addEventListener('abort', abort, {once: true});
+		});
+
+		try {
+			return await Promise.race([
+				callback(),
+				abortPromise,
+			]);
+		} finally {
+			signal.removeEventListener('abort', abort);
+		}
 	};
 
 	const fetchWithHooks = async (urlOrRequest, options = {}) => {
@@ -106,15 +126,12 @@ export function withHooks(fetchFunction, {beforeRequest, afterResponse} = {}) {
 			}
 		}
 
-		const requestSignal = getRequestSignal(urlOrRequest, options);
-		const fetchOptions = requestSignal === hookOptions.signal
-			? options
-			: {...options, signal: hookOptions.signal};
-		const fetchInput = urlOrRequest instanceof Request && Object.hasOwn(options, 'body') && options.body === undefined
+		const finalFetchOptions = getFetchOptions(urlOrRequest, options, hookOptions.signal);
+		const fetchInput = urlOrRequest instanceof Request && Object.hasOwn(finalFetchOptions, 'body') && finalFetchOptions.body === undefined
 			? url
 			: urlOrRequest;
 
-		const response = await fetchFunction(fetchInput, fetchOptions);
+		const response = await fetchFunction(fetchInput, finalFetchOptions);
 
 		if (afterResponse) {
 			const modifiedResponse = await waitForHook(() => afterResponse({url, options: hookOptions, response}), hookOptions.signal);

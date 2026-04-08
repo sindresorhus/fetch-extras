@@ -7,6 +7,8 @@ export const resolveRequestHeadersSymbol = Symbol('resolveRequestHeaders');
 export const resolveRequestBodySymbol = Symbol('resolveRequestBody');
 export const waitForConcurrencySlotSymbol = Symbol('waitForConcurrencySlot');
 export const defersConcurrencySlotSymbol = Symbol('defersConcurrencySlot');
+export const notifyFetchStartSymbol = Symbol('notifyFetchStart');
+export const defersFetchStartSymbol = Symbol('defersFetchStart');
 export const requestBodyHeaderNames = [
 	'content-encoding',
 	'content-language',
@@ -351,6 +353,14 @@ export function getFetchSignal(fetchFunction, providedSignal) {
 	return getTimeoutSignal(timeoutDuration, providedSignal);
 }
 
+export function notifyFetchStart(fetchFunction, options) {
+	if (fetchFunction[defersFetchStartSymbol]) {
+		return;
+	}
+
+	options[notifyFetchStartSymbol]?.();
+}
+
 export async function discardBody(body) {
 	try {
 		await body?.cancel?.();
@@ -378,6 +388,7 @@ export function copyFetchMetadata(targetFetch, sourceFetch) {
 	/*
 	Boundary: this only forwards metadata that outer wrappers need to preserve their documented behavior.
 	Right now that is timeoutDurationSymbol, resolveRequestUrlSymbol, resolveAuthorizationHeaderSymbol, resolveRequestHeadersSymbol, and resolveRequestBodySymbol so wrappers can preserve timeout behavior, URL-based composition semantics, Authorization-scoped refresh deduplication, effective request-header inspection, and replayable transformed request bodies through simple wrapper chains.
+	Nested withTimeout wrappers are not a supported contract. Keep timeout forwarding simple and let the outermost documented withTimeout define the budget.
 	Do not expand this into a generic wrapper-introspection channel.
 	*/
 	if (sourceFetch[timeoutDurationSymbol] !== undefined) {
@@ -398,6 +409,10 @@ export function copyFetchMetadata(targetFetch, sourceFetch) {
 
 	if (targetFetch[resolveRequestBodySymbol] === undefined && sourceFetch[resolveRequestBodySymbol] !== undefined) {
 		targetFetch[resolveRequestBodySymbol] = sourceFetch[resolveRequestBodySymbol];
+	}
+
+	if (targetFetch[defersFetchStartSymbol] === undefined && sourceFetch[defersFetchStartSymbol] !== undefined) {
+		targetFetch[defersFetchStartSymbol] = sourceFetch[defersFetchStartSymbol];
 	}
 
 	return targetFetch;
