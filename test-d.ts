@@ -1,5 +1,6 @@
 import {
 	pipeline,
+	SchemaValidationError,
 	withBaseUrl,
 	withCache,
 	withDeduplication,
@@ -7,9 +8,13 @@ import {
 	withHooks,
 	withHttpError,
 	withJsonBody,
+	withJsonResponse,
 	withRateLimit,
 	withSearchParameters,
 	withTimeout,
+	type StandardSchemaV1,
+	type StandardSchemaV1InferOutput,
+	type StandardSchemaV1Issue,
 } from './source/index.js';
 
 const result: number = pipeline(
@@ -234,3 +239,72 @@ const wrappedCustomHooksFetchResponse: Promise<Response & {readonly custom: true
 // @ts-expect-error Wrapped fetch should not gain unrelated RequestInit fields.
 void wrappedCustomHooksFetch('/custom', {method: 'POST'});
 void wrappedCustomHooksFetchResponse;
+
+// `withJsonResponse` (no schema)
+const fetchJson = withJsonResponse(fetch);
+const jsonData: Promise<unknown> = fetchJson('/api/data');
+void jsonData;
+
+const fetchJsonWithEmptyOptions = withJsonResponse(fetch, {});
+const jsonDataWithEmptyOptions: Promise<unknown> = fetchJsonWithEmptyOptions('/api/data');
+void jsonDataWithEmptyOptions;
+
+// `withJsonResponse` (no schema) in pipeline
+const fetchJsonPipeline = pipeline(
+	fetch,
+	fetchFunction => withTimeout(fetchFunction, 5000),
+	withHttpError,
+	withJsonResponse,
+);
+const pipelineJson: Promise<unknown> = fetchJsonPipeline('/api/data');
+void pipelineJson;
+
+// `withJsonResponse` (with schema)
+type User = {name: string; age: number};
+const userSchema: StandardSchemaV1<unknown, User> = {
+	// eslint-disable-next-line @typescript-eslint/naming-convention
+	'~standard': {
+		version: 1,
+		vendor: 'test',
+		validate(value) {
+			return {value: value as User};
+		},
+	},
+};
+
+const fetchUser = withJsonResponse(fetch, {schema: userSchema});
+const user: Promise<User> = fetchUser('/api/user');
+void user;
+
+const enabled = Math.random() > 0.5;
+const maybeSchemaOptions = enabled ? {schema: userSchema} : {};
+const fetchMaybeValidatedUser = withJsonResponse(fetch, maybeSchemaOptions);
+const maybeValidatedUser: Promise<unknown> = fetchMaybeValidatedUser('/api/user');
+void maybeValidatedUser;
+
+// WithJsonResponse (with schema) in pipeline
+const fetchUserPipeline = pipeline(
+	fetch,
+	fetchFunction => withTimeout(fetchFunction, 5000),
+	fetchFunction => withBaseUrl(fetchFunction, 'https://api.example.com'),
+	withHttpError,
+	fetchFunction => withJsonResponse(fetchFunction, {schema: userSchema}),
+);
+const pipelineUser: Promise<User> = fetchUserPipeline('/users/1');
+void pipelineUser;
+
+// WithJsonResponse infers output type from schema types
+type InferredOutput = StandardSchemaV1InferOutput<typeof userSchema>;
+const _inferCheck: InferredOutput = {name: 'Alice', age: 30};
+void _inferCheck;
+
+// SchemaValidationError shape
+const schemaError = new SchemaValidationError([{message: 'test'}], new Response());
+const _errorName: 'SchemaValidationError' = schemaError.name;
+const _errorCode: 'ERR_SCHEMA_VALIDATION' = schemaError.code;
+const _errorIssues: readonly StandardSchemaV1Issue[] = schemaError.issues;
+const _errorResponse: Response = schemaError.response;
+void _errorName;
+void _errorCode;
+void _errorIssues;
+void _errorResponse;

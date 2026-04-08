@@ -20,4 +20,11 @@ export {
 	type FetchFunction,
 	type PaginateOptions,
 } from './paginate.js';
+export {
+	SchemaValidationError,
+	withJsonResponse,
+	type StandardSchemaV1,
+	type StandardSchemaV1InferOutput,
+	type StandardSchemaV1Issue,
+} from './with-json-response.js';
 export {pipeline} from './pipeline.js';

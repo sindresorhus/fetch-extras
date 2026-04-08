@@ -12,6 +12,7 @@ Build tiny, focused HTTP clients by composing only the features you need on top 
 - **Standard `fetch`** — The input and output are always a plain `fetch` function. Your code stays portable and familiar.
 - **Tree-shakeable** — Only the utilities you import end up in your bundle.
 - **TypeScript** — Full type definitions with strong generics.
+- **Schema validation** — Validate responses against [Standard Schema](https://standardschema.dev) (Zod, Valibot, ArkType, etc.).
 
 *For a full-featured HTTP client on top of Fetch, check out my [`ky`](https://github.com/sindresorhus/ky) package.*
 
@@ -29,7 +30,8 @@ import {
 	withTimeout,
 	withBaseUrl,
 	withHeaders,
-	withHttpError
+	withHttpError,
+	withJsonResponse,
 } from 'fetch-extras';
 
 // Create a tiny reusable API client that:
@@ -37,21 +39,24 @@ import {
 // - Uses a base URL so you only write paths
 // - Sends auth headers on every request
 // - Throws errors for non-2xx responses
+// - Parses JSON responses automatically
 const apiFetch = pipeline(
 	fetch,
 	f => withTimeout(f, 5000),
 	f => withBaseUrl(f, 'https://api.example.com'),
 	f => withHeaders(f, {Authorization: 'Bearer token'}),
 	withHttpError,
+	withJsonResponse,
 );
 
-const response = await apiFetch('/users');
-const data = await response.json();
+const data = await apiFetch('/users');
 ```
 
 ## API
 
-The `with*` functions are listed in the recommended wrapping order for use with [`pipeline`](docs/pipeline.md).
+### Wrappers
+
+Listed in the recommended wrapping order for use with [`pipeline`](docs/pipeline.md).
 
 - [`withTimeout`](docs/with-timeout.md) - Abort requests that take too long
 - [`withBaseUrl`](docs/with-base-url.md) - Resolve relative URLs against a base URL
@@ -68,10 +73,18 @@ The `with*` functions are listed in the recommended wrapping order for use with 
 - [`withTokenRefresh`](docs/with-token-refresh.md) - Auto-refresh auth tokens on 401 and retry
 - [`withHooks`](docs/with-hooks.md) - `beforeRequest` and `afterResponse` hooks
 - [`withHttpError`](docs/http-error.md#withhttperrorfetchfunction) - Throw on non-2xx responses
-- [`HttpError`](docs/http-error.md#httperror) - Error class for non-2xx responses
-- [`throwIfHttpError`](docs/http-error.md#throwifhttperrorresponse) - Throw if a response is non-2xx
-- [`paginate`](docs/paginate.md) - Async-iterate over paginated API endpoints
+- [`withJsonResponse`](docs/with-json-response.md) - Parse response as JSON, with optional [Standard Schema](https://standardschema.dev) validation *(place last in pipeline)*
+
+### Utilities
+
 - [`pipeline`](docs/pipeline.md) - Compose `with*` wrappers without deep nesting
+- [`paginate`](docs/paginate.md) - Async-iterate over paginated API endpoints
+- [`throwIfHttpError`](docs/http-error.md#throwifhttperrorresponse) - Throw if a response is non-2xx
+
+### Errors
+
+- [`HttpError`](docs/http-error.md#httperror) - Error class for non-2xx responses
+- [`SchemaValidationError`](docs/schema-validation-error.md) - Error class for schema validation failures
 
 ## FAQ
 
