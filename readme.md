@@ -4,7 +4,14 @@
 
 > Useful utilities for working with [Fetch](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API)
 
-Great for creating tiny custom HTTP clients without a heavy dependency. Fully tree-shakeable.
+Build tiny, focused HTTP clients by composing only the features you need on top of the standard `fetch` API. No wrapper objects, no new interface to learn, no lock-in.
+
+## Highlights
+
+- **Composable** — Each `with*` function adds a single capability. Stack them to build exactly the client you need.
+- **Standard `fetch`** — The input and output are always a plain `fetch` function. Your code stays portable and familiar.
+- **Tree-shakeable** — Only the utilities you import end up in your bundle.
+- **TypeScript** — Full type definitions with strong generics.
 
 *For a full-featured HTTP client on top of Fetch, check out my [`ky`](https://github.com/sindresorhus/ky) package.*
 
@@ -46,25 +53,31 @@ const data = await response.json();
 
 The `with*` functions are listed in the recommended wrapping order for use with [`pipeline`](docs/pipeline.md).
 
-- [`withTimeout`](docs/with-timeout.md)
-- [`withBaseUrl`](docs/with-base-url.md)
-- [`withSearchParameters`](docs/with-search-parameters.md)
-- [`withHeaders`](docs/with-headers.md)
-- [`withJsonBody`](docs/with-json-body.md)
-- [`withRateLimit`](docs/with-rate-limit.md)
-- [`withConcurrency`](docs/with-concurrency.md)
-- [`withDeduplication`](docs/with-deduplication.md)
-- [`withCache`](docs/with-cache.md)
-- [`withDownloadProgress`](docs/with-download-progress.md)
-- [`withUploadProgress`](docs/with-upload-progress.md)
-- [`withRetry`](docs/with-retry.md)
-- [`withTokenRefresh`](docs/with-token-refresh.md)
-- [`withHooks`](docs/with-hooks.md)
-- [`withHttpError`](docs/http-error.md#withhttperrorfetchfunction)
-- [`HttpError`](docs/http-error.md#httperror)
-- [`throwIfHttpError`](docs/http-error.md#throwifhttperrorresponse)
-- [`paginate`](docs/paginate.md)
-- [`pipeline`](docs/pipeline.md)
+- [`withTimeout`](docs/with-timeout.md) - Abort requests that take too long
+- [`withBaseUrl`](docs/with-base-url.md) - Resolve relative URLs against a base URL
+- [`withSearchParameters`](docs/with-search-parameters.md) - Attach default query parameters to every request
+- [`withHeaders`](docs/with-headers.md) - Attach default headers to every request
+- [`withJsonBody`](docs/with-json-body.md) - Auto-stringify plain objects as JSON
+- [`withRateLimit`](docs/with-rate-limit.md) - Enforce client-side rate limiting with a sliding window
+- [`withConcurrency`](docs/with-concurrency.md) - Cap how many requests can run simultaneously
+- [`withDeduplication`](docs/with-deduplication.md) - Collapse concurrent identical GET requests into a single call
+- [`withCache`](docs/with-cache.md) - In-memory GET response caching with a TTL
+- [`withDownloadProgress`](docs/with-download-progress.md) - Track download progress
+- [`withUploadProgress`](docs/with-upload-progress.md) - Track upload progress
+- [`withRetry`](docs/with-retry.md) - Retry failed requests with exponential backoff
+- [`withTokenRefresh`](docs/with-token-refresh.md) - Auto-refresh auth tokens on 401 and retry
+- [`withHooks`](docs/with-hooks.md) - `beforeRequest` and `afterResponse` hooks
+- [`withHttpError`](docs/http-error.md#withhttperrorfetchfunction) - Throw on non-2xx responses
+- [`HttpError`](docs/http-error.md#httperror) - Error class for non-2xx responses
+- [`throwIfHttpError`](docs/http-error.md#throwifhttperrorresponse) - Throw if a response is non-2xx
+- [`paginate`](docs/paginate.md) - Async-iterate over paginated API endpoints
+- [`pipeline`](docs/pipeline.md) - Compose `with*` wrappers without deep nesting
+
+## FAQ
+
+### How is this different from Ky?
+
+[Ky](https://github.com/sindresorhus/ky) is a full-featured HTTP client with its own API (`ky.get()`, `.json()`, etc.). This package instead gives you individual utilities that wrap the standard `fetch` function. You pick only what you need and compose them together. If you want a batteries-included client, use Ky. If you want to stay close to the `fetch` API while adding specific capabilities, use this.
 
 ## Related
 
