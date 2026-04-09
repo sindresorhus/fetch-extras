@@ -1,13 +1,16 @@
 import {
 	copyFetchMetadata,
+	defersFetchStartSymbol,
 	getFetchSignal,
 	getRequestOptions,
 	getRequestSignal,
+	notifyFetchStart,
 	resolveRequestBody,
 	resolveRequestBodySymbol,
 	resolveRequestHeaders,
 	resolveRequestHeadersSymbol,
 	resolveRequestUrl,
+	waitForAbortable,
 } from './utilities.js';
 
 const inheritedHookBodies = new WeakSet();
@@ -24,7 +27,7 @@ This is the recommended way to add custom logic (logging, metrics, dynamic heade
 @param {typeof fetch} fetchFunction - The fetch function to wrap (usually the global `fetch`).
 @param {object} [options]
 @param {(context: {url: string, options: RequestInit}) => RequestInit | Response | void | Promise<RequestInit | Response | void>} [options.beforeRequest] - Called before each request. Receives the resolved URL and the request options. Return a replacement `RequestInit` to modify the request options, return a `Response` to short-circuit the request entirely (skipping the fetch call and `afterResponse`), or return `undefined` to leave them unchanged.
-@param {(context: {url: string, options: RequestInit, response: Response}) => Response | void | Promise<Response | void>} [options.afterResponse] - Called after each response. Receives the response, resolved URL, and the request options. Return a replacement `Response` to modify the response, or return `undefined` to leave it unchanged.
+@param {(context: {url: string, options: RequestInit, response: Response}) => Response | void | Promise<Response | void>} [options.afterResponse] - Called after each response. Receives the resolved URL, the request options, and the response. Return a replacement `Response` to modify the response, or return `undefined` to leave it unchanged.
 @returns {typeof fetch} A wrapped fetch function with hooks.
 */
 export function withHooks(fetchFunction, {beforeRequest, afterResponse} = {}) {
@@ -51,32 +54,6 @@ export function withHooks(fetchFunction, {beforeRequest, afterResponse} = {}) {
 		}
 
 		return ['GET', 'HEAD'].includes(options.method?.toUpperCase());
-	};
-
-	const waitForHook = async (callback, signal) => {
-		signal?.throwIfAborted();
-
-		if (!signal) {
-			return callback();
-		}
-
-		let abort;
-		const abortPromise = new Promise((_resolve, reject) => {
-			abort = () => {
-				reject(signal.reason);
-			};
-
-			signal.addEventListener('abort', abort, {once: true});
-		});
-
-		try {
-			return await Promise.race([
-				callback(),
-				abortPromise,
-			]);
-		} finally {
-			signal.removeEventListener('abort', abort);
-		}
 	};
 
 	const fetchWithHooks = async (urlOrRequest, options = {}) => {
@@ -111,7 +88,7 @@ export function withHooks(fetchFunction, {beforeRequest, afterResponse} = {}) {
 		let hookOptions = getHookOptions(options);
 
 		if (beforeRequest) {
-			let result = await waitForHook(() => beforeRequest({url, options: hookOptions}), hookOptions.signal);
+			let result = await waitForAbortable(() => beforeRequest({url, options: hookOptions}), hookOptions.signal);
 			if (result instanceof Response) {
 				return result;
 			}
@@ -131,10 +108,11 @@ export function withHooks(fetchFunction, {beforeRequest, afterResponse} = {}) {
 			? url
 			: urlOrRequest;
 
+		notifyFetchStart(fetchFunction, finalFetchOptions);
 		const response = await fetchFunction(fetchInput, finalFetchOptions);
 
 		if (afterResponse) {
-			const modifiedResponse = await waitForHook(() => afterResponse({url, options: hookOptions, response}), hookOptions.signal);
+			const modifiedResponse = await waitForAbortable(() => afterResponse({url, options: hookOptions, response}), hookOptions.signal);
 			if (modifiedResponse !== undefined) {
 				return modifiedResponse;
 			}
@@ -143,5 +121,7 @@ export function withHooks(fetchFunction, {beforeRequest, afterResponse} = {}) {
 		return response;
 	};
 
-	return copyFetchMetadata(fetchWithHooks, fetchFunction);
+	const wrappedFetch = copyFetchMetadata(fetchWithHooks, fetchFunction);
+	wrappedFetch[defersFetchStartSymbol] = true;
+	return wrappedFetch;
 }

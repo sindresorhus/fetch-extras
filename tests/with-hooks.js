@@ -196,6 +196,78 @@ test('async hooks', async t => {
 	t.is(await response.text(), 'async-replaced');
 });
 
+test('beforeRequest aborts before an async hook settles', async t => {
+	const controller = new AbortController();
+	const mockFetch = createCapturingFetch();
+	let resolveBeforeRequest;
+	const beforeRequestStarted = new Promise(resolve => {
+		resolveBeforeRequest = resolve;
+	});
+
+	const fetchWithHooks = withHooks(mockFetch, {
+		async beforeRequest() {
+			resolveBeforeRequest();
+			await new Promise(resolve => {
+				setTimeout(resolve, 200);
+			});
+		},
+	});
+
+	const fetchPromise = fetchWithHooks('/api', {signal: controller.signal});
+
+	await beforeRequestStarted;
+	controller.abort();
+
+	const raceWinner = await Promise.race([
+		fetchPromise.then(() => 'settled', () => 'settled'),
+		new Promise(resolve => {
+			setTimeout(() => {
+				resolve('timeout');
+			}, 50);
+		}),
+	]);
+
+	t.is(raceWinner, 'settled');
+	await t.throwsAsync(fetchPromise, {name: 'AbortError'});
+	t.is(mockFetch.calls.length, 0);
+});
+
+test('afterResponse aborts before an async hook settles', async t => {
+	const controller = new AbortController();
+	const mockFetch = createCapturingFetch();
+	let resolveAfterResponse;
+	const afterResponseStarted = new Promise(resolve => {
+		resolveAfterResponse = resolve;
+	});
+
+	const fetchWithHooks = withHooks(mockFetch, {
+		async afterResponse() {
+			resolveAfterResponse();
+			await new Promise(resolve => {
+				setTimeout(resolve, 200);
+			});
+		},
+	});
+
+	const fetchPromise = fetchWithHooks('/api', {signal: controller.signal});
+
+	await afterResponseStarted;
+	controller.abort();
+
+	const raceWinner = await Promise.race([
+		fetchPromise.then(() => 'settled', () => 'settled'),
+		new Promise(resolve => {
+			setTimeout(() => {
+				resolve('timeout');
+			}, 50);
+		}),
+	]);
+
+	t.is(raceWinner, 'settled');
+	await t.throwsAsync(fetchPromise, {name: 'AbortError'});
+	t.is(mockFetch.calls.length, 1);
+});
+
 test('afterResponse receives modified options from beforeRequest', async t => {
 	const mockFetch = createCapturingFetch();
 	let afterOptions;

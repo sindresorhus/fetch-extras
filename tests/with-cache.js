@@ -6,6 +6,7 @@ import {
 	withConcurrency,
 	withDeduplication,
 	withHeaders,
+	withHooks,
 	withSearchParameters,
 	withRateLimit,
 	withTimeout,
@@ -78,6 +79,292 @@ test('different URLs are cached independently', async t => {
 	await cachedFetch('https://example.com/b');
 
 	t.is(mockFetch.callCount, 2);
+});
+
+test('GET requests with Authorization headers are not cached', async t => {
+	let callCount = 0;
+
+	const mockFetch = async (_url, options = {}) => {
+		callCount++;
+		return Response.json({
+			callCount,
+			authorization: new Headers(options.headers).get('authorization'),
+		});
+	};
+
+	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+
+	const firstResponse = await cachedFetch('https://example.com/api', {
+		headers: {
+			authorization: 'Bearer alice',
+		},
+	});
+	const secondResponse = await cachedFetch('https://example.com/api', {
+		headers: {
+			authorization: 'Bearer bob',
+		},
+	});
+
+	t.deepEqual(await firstResponse.json(), {
+		callCount: 1,
+		authorization: 'Bearer alice',
+	});
+	t.deepEqual(await secondResponse.json(), {
+		callCount: 2,
+		authorization: 'Bearer bob',
+	});
+});
+
+test('GET requests with inherited Authorization headers are not cached', async t => {
+	let callCount = 0;
+
+	const mockFetch = async (_url, options = {}) => {
+		callCount++;
+		return Response.json({
+			callCount,
+			authorization: new Headers(options.headers).get('authorization'),
+		});
+	};
+
+	const cachedFetch = pipeline(
+		mockFetch,
+		fetchFunction => withHeaders(fetchFunction, {
+			authorization: 'Bearer token',
+		}),
+		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+	);
+
+	const firstResponse = await cachedFetch('https://example.com/api');
+	const secondResponse = await cachedFetch('https://example.com/api');
+
+	t.deepEqual(await firstResponse.json(), {
+		callCount: 1,
+		authorization: 'Bearer token',
+	});
+	t.deepEqual(await secondResponse.json(), {
+		callCount: 2,
+		authorization: 'Bearer token',
+	});
+});
+
+test('GET requests with inherited non-auth headers are not cached', async t => {
+	let callCount = 0;
+
+	const mockFetch = async (_url, options = {}) => {
+		callCount++;
+		return Response.json({
+			callCount,
+			tenant: new Headers(options.headers).get('x-tenant'),
+		});
+	};
+
+	const cachedFetch = pipeline(
+		mockFetch,
+		fetchFunction => withHeaders(fetchFunction, {
+			'x-tenant': 'alpha',
+		}),
+		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+	);
+
+	const firstResponse = await cachedFetch('https://example.com/api');
+	const secondResponse = await cachedFetch('https://example.com/api');
+
+	t.deepEqual(await firstResponse.json(), {
+		callCount: 1,
+		tenant: 'alpha',
+	});
+	t.deepEqual(await secondResponse.json(), {
+		callCount: 2,
+		tenant: 'alpha',
+	});
+});
+
+test('GET requests with Cookie headers are not cached', async t => {
+	let callCount = 0;
+
+	const mockFetch = async (_url, options = {}) => {
+		callCount++;
+		return Response.json({
+			callCount,
+			cookie: new Headers(options.headers).get('cookie'),
+		});
+	};
+
+	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+
+	const firstResponse = await cachedFetch('https://example.com/api', {
+		headers: {
+			cookie: 'session=alice',
+		},
+	});
+	const secondResponse = await cachedFetch('https://example.com/api', {
+		headers: {
+			cookie: 'session=bob',
+		},
+	});
+
+	t.deepEqual(await firstResponse.json(), {
+		callCount: 1,
+		cookie: 'session=alice',
+	});
+	t.deepEqual(await secondResponse.json(), {
+		callCount: 2,
+		cookie: 'session=bob',
+	});
+});
+
+test('GET requests with custom credential headers are not cached', async t => {
+	let callCount = 0;
+
+	const mockFetch = async (_url, options = {}) => {
+		callCount++;
+		return Response.json({
+			callCount,
+			apiKey: new Headers(options.headers).get('x-api-key'),
+		});
+	};
+
+	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+
+	const firstResponse = await cachedFetch('https://example.com/api', {
+		headers: {
+			'x-api-key': 'alice',
+		},
+	});
+	const secondResponse = await cachedFetch('https://example.com/api', {
+		headers: {
+			'x-api-key': 'bob',
+		},
+	});
+
+	t.deepEqual(await firstResponse.json(), {
+		callCount: 1,
+		apiKey: 'alice',
+	});
+	t.deepEqual(await secondResponse.json(), {
+		callCount: 2,
+		apiKey: 'bob',
+	});
+});
+
+test('Request inputs with Authorization headers are not cached', async t => {
+	let callCount = 0;
+
+	const mockFetch = async request => {
+		callCount++;
+		return Response.json({
+			callCount,
+			authorization: request.headers.get('authorization'),
+		});
+	};
+
+	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+
+	const firstResponse = await cachedFetch(new Request('https://example.com/api', {
+		headers: {
+			authorization: 'Bearer alice',
+		},
+	}));
+	const secondResponse = await cachedFetch(new Request('https://example.com/api', {
+		headers: {
+			authorization: 'Bearer bob',
+		},
+	}));
+
+	t.deepEqual(await firstResponse.json(), {
+		callCount: 1,
+		authorization: 'Bearer alice',
+	});
+	t.deepEqual(await secondResponse.json(), {
+		callCount: 2,
+		authorization: 'Bearer bob',
+	});
+});
+
+test('sensitive GET requests bypass existing public cache entries', async t => {
+	let callCount = 0;
+
+	const mockFetch = async (url, options = {}) => {
+		callCount++;
+		return Response.json({
+			callCount,
+			url,
+			authorization: new Headers(options.headers).get('authorization'),
+		});
+	};
+
+	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+
+	const publicResponse = await cachedFetch('https://example.com/api');
+	t.deepEqual(await publicResponse.json(), {
+		callCount: 1,
+		url: 'https://example.com/api',
+		authorization: null,
+	});
+
+	const authenticatedResponse = await cachedFetch('https://example.com/api', {
+		headers: {
+			authorization: 'Bearer alice',
+		},
+	});
+	t.deepEqual(await authenticatedResponse.json(), {
+		callCount: 2,
+		url: 'https://example.com/api',
+		authorization: 'Bearer alice',
+	});
+
+	const secondPublicResponse = await cachedFetch('https://example.com/api');
+	t.deepEqual(await secondPublicResponse.json(), {
+		callCount: 1,
+		url: 'https://example.com/api',
+		authorization: null,
+	});
+});
+
+test('conditional GET requests bypass existing cache entries', async t => {
+	let callCount = 0;
+
+	const mockFetch = async (_url, options = {}) => {
+		callCount++;
+		return Response.json({
+			callCount,
+			ifNoneMatch: new Headers(options.headers).get('if-none-match'),
+		});
+	};
+
+	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+
+	const firstResponse = await cachedFetch('https://example.com/api');
+	t.deepEqual(await firstResponse.json(), {
+		callCount: 1,
+		ifNoneMatch: null,
+	});
+
+	const secondResponse = await cachedFetch('https://example.com/api', {
+		headers: {
+			'if-none-match': '"etag-2"',
+		},
+	});
+	t.deepEqual(await secondResponse.json(), {
+		callCount: 2,
+		ifNoneMatch: '"etag-2"',
+	});
+});
+
+test('header-bearing cache: only-if-cached requests return a cache miss', async t => {
+	const mockFetch = createMockFetch();
+	const cachedFetch = pipeline(
+		mockFetch,
+		fetchFunction => withHeaders(fetchFunction, {
+			'x-tenant': 'alpha',
+		}),
+		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+	);
+
+	const response = await cachedFetch('https://example.com/api', {cache: 'only-if-cached'});
+
+	t.is(response.status, 504);
+	t.is(mockFetch.callCount, 0);
 });
 
 test('non-GET requests pass through', async t => {
@@ -219,6 +506,71 @@ test('queued mutating requests that time out before start do not evict cached GE
 	const cachedResponse = await cachedFetch('https://example.com/api');
 	t.deepEqual(await cachedResponse.json(), {callCount: 1});
 	t.is(getCallCount, 1);
+});
+
+test('short-circuited mutating requests do not evict cached GET responses', async t => {
+	let getCallCount = 0;
+	const mockFetch = async (_urlOrRequest, options = {}) => {
+		const method = (options.method ?? 'GET').toUpperCase();
+
+		if (method === 'GET') {
+			getCallCount++;
+			return new Response(`get-${getCallCount}`);
+		}
+
+		return new Response('mutated');
+	};
+
+	const cachedFetch = withCache(withHooks(mockFetch, {
+		beforeRequest({options}) {
+			if ((options.method ?? 'GET').toUpperCase() === 'POST') {
+				return new Response('short-circuited');
+			}
+		},
+	}), {ttl: 60_000});
+
+	const initialResponse = await cachedFetch('https://example.com/api');
+	t.is(await initialResponse.text(), 'get-1');
+
+	const mutationResponse = await cachedFetch('https://example.com/api', {method: 'POST'});
+	t.is(await mutationResponse.text(), 'short-circuited');
+
+	const cachedResponse = await cachedFetch('https://example.com/api');
+	t.is(await cachedResponse.text(), 'get-1');
+	t.is(getCallCount, 1);
+});
+
+test('mutating requests through withHooks still evict cached GET responses when fetch starts', async t => {
+	let getCallCount = 0;
+	let postCallCount = 0;
+	const mockFetch = async (_urlOrRequest, options = {}) => {
+		const method = (options.method ?? 'GET').toUpperCase();
+
+		if (method === 'GET') {
+			getCallCount++;
+			return new Response(`get-${getCallCount}`);
+		}
+
+		postCallCount++;
+		return new Response('mutated');
+	};
+
+	const cachedFetch = withCache(withHooks(mockFetch, {
+		async beforeRequest() {
+			await Promise.resolve();
+		},
+	}), {ttl: 60_000});
+
+	const initialResponse = await cachedFetch('https://example.com/api');
+	t.is(await initialResponse.text(), 'get-1');
+
+	const mutationResponse = await cachedFetch('https://example.com/api', {method: 'POST'});
+	t.is(await mutationResponse.text(), 'mutated');
+	t.is(postCallCount, 1);
+
+	const refetchedResponse = await cachedFetch('https://example.com/api');
+	t.is(await refetchedResponse.text(), 'get-2');
+	t.is(getCallCount, 2);
 });
 
 test('queued mutating requests in nested delayed-start wrappers do not evict cached GET responses', async t => {

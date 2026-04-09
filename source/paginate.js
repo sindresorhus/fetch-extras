@@ -36,27 +36,11 @@ const defaultPaginationOptions = {
 	stackAllItems: false,
 };
 
-const sensitiveHeaderNames = [
-	'authorization',
-	'cookie',
-	'proxy-authorization',
-];
-
 const stripBodyHeaders = headers => {
 	const cleanedHeaders = new Headers(headers);
 	cleanedHeaders.delete('content-length');
 
 	for (const headerName of requestBodyHeaderNames) {
-		cleanedHeaders.delete(headerName);
-	}
-
-	return cleanedHeaders;
-};
-
-const stripSensitiveHeaders = headers => {
-	const cleanedHeaders = new Headers(headers);
-
-	for (const headerName of sensitiveHeaderNames) {
 		cleanedHeaders.delete(headerName);
 	}
 
@@ -73,11 +57,6 @@ const methodCanHaveBody = method => method === undefined || !['get', 'head'].inc
 const requestWithoutBody = request => ({
 	...requestSnapshot(request),
 	headers: stripBodyHeaders(request.headers),
-});
-
-const requestWithoutSensitiveState = request => ({
-	...requestWithoutBody(request),
-	headers: stripSensitiveHeaders(stripBodyHeaders(request.headers)),
 });
 
 const stripBodyHeadersFromFetchOptions = fetchOptions => {
@@ -109,10 +88,11 @@ const normalizeFetchOptions = fetchOptions => shouldStripBodyHeaders(fetchOption
 
 const shouldStripBodyHeaders = fetchOptions => (Object.hasOwn(fetchOptions, 'body') && fetchOptions.body === undefined) || (!methodCanHaveBody(fetchOptions.method) && !Object.hasOwn(fetchOptions, 'body'));
 const shouldResetBodyHeaders = fetchOptions => shouldStripBodyHeaders(fetchOptions) || Object.hasOwn(fetchOptions, 'body');
+const hasExplicitBody = fetchOptions => Object.hasOwn(fetchOptions, 'body') && fetchOptions.body !== undefined;
 const integerOrInfinity = value => value === Number.POSITIVE_INFINITY || Number.isInteger(value);
 const isPaginationFetchOptions = value => typeof value === 'object' && value !== null && !Array.isArray(value) && !(value instanceof URL);
 const isCrossOrigin = (currentUrl, nextUrl) => currentUrl.origin !== nextUrl.origin;
-const shouldStripInheritedSensitiveState = (inheritedStateOrigin, requestUrl) => inheritedStateOrigin && requestUrl instanceof URL && isCrossOrigin(inheritedStateOrigin, requestUrl);
+const shouldStripInheritedHeaderState = (inheritedStateOrigin, requestUrl) => inheritedStateOrigin && requestUrl instanceof URL && isCrossOrigin(inheritedStateOrigin, requestUrl);
 
 const toUrl = (input, baseUrl = globalThis.location?.href) => {
 	const url = input instanceof Request ? input.url : input;
@@ -183,46 +163,43 @@ const createResolvedRequestTemplateState = (fetchFunction, input, fetchOptions) 
 const shouldUseRequestTemplateOnFirstRequest = (input, fetchOptions) => input instanceof Request || (absoluteUrl(input) && fetchOptions.body instanceof ReadableStream);
 
 const currentSignal = (requestTemplate, fetchOptions) => fetchOptions.signal ?? requestTemplate?.signal;
-const requestWithoutSensitiveHeaders = request => ({
-	...requestSnapshot(request),
-	headers: stripSensitiveHeaders(request.headers),
-});
 
-const stripInheritedSensitiveState = (requestTemplate, fetchOptions) => ({
-	requestTemplate: requestTemplate && markToBlockDefaultHeaders(new Request(requestTemplate.url, requestTemplate.body === null ? requestWithoutSensitiveHeaders(requestTemplate) : requestWithoutSensitiveState(requestTemplate)), sensitiveHeaderNames),
-	fetchOptions: Object.hasOwn(fetchOptions, 'body') && fetchOptions.body !== undefined ? normalizeBodylessFetchOptions(markSensitiveHeadersAsFinal(fetchOptions)) : markSensitiveHeadersAsFinal(fetchOptions),
-});
+const getHeaderNames = headers => [...new Headers(headers).keys()];
 
-const markSensitiveHeadersAsFinal = fetchOptions => {
-	if (!('headers' in fetchOptions)) {
-		return markToBlockDefaultHeaders({...fetchOptions}, sensitiveHeaderNames);
-	}
+/*
+Boundary: following a Link header is not an HTTP redirect. We are constructing a new request for a new URL, often in environments like Node where callers can set arbitrary credential headers. The standards only special-case a few headers for browser-controlled redirects, which is not enough here because secrets often live in custom headers such as x-api-key. So when pagination crosses origins, inherited headers are cleared and only headers explicitly returned from pagination.paginate are kept for the new origin.
+*/
+const clearCrossOriginHeaderState = (fetchFunction, input, requestTemplate, fetchOptions) => {
+	const blockedHeaderNames = getHeaderNames(resolveRequestHeaders(fetchFunction, input, fetchOptions));
+	const nextFetchOptions = markToBlockDefaultHeaders(
+		'headers' in fetchOptions
+			? {
+				...fetchOptions,
+				headers: markToBlockDefaultHeaders(new Headers(), blockedHeaderNames),
+			}
+			: {...fetchOptions},
+		blockedHeaderNames,
+	);
 
-	return markToBlockDefaultHeaders({
-		...fetchOptions,
-		headers: markToBlockDefaultHeaders(stripSensitiveHeaders(fetchOptions.headers), sensitiveHeaderNames),
-	}, sensitiveHeaderNames);
+	return {
+		requestTemplate: requestTemplate && markToBlockDefaultHeaders(new Request(requestTemplate.url, {
+			...requestSnapshot(requestTemplate),
+			headers: new Headers(),
+		}), blockedHeaderNames),
+		currentFetchOptions: hasExplicitBody(fetchOptions) ? normalizeBodylessFetchOptions(nextFetchOptions) : nextFetchOptions,
+		inheritedStateOrigin: undefined,
+	};
 };
 
-const hasSensitiveHeaders = headers => {
-	const normalizedHeaders = new Headers(headers);
-
-	for (const headerName of sensitiveHeaderNames) {
-		if (normalizedHeaders.has(headerName)) {
-			return true;
-		}
-	}
-
-	return false;
-};
-
-const hasExplicitSensitiveState = fetchOptions => ('body' in fetchOptions && fetchOptions.body !== undefined) || ('headers' in fetchOptions && hasSensitiveHeaders(fetchOptions.headers));
+const hasExplicitHeaderState = fetchOptions => hasExplicitBody(fetchOptions) || ('headers' in fetchOptions && getHeaderNames(fetchOptions.headers).length > 0);
 const shouldClearInheritedBody = (fetchOptions, nextPageOptions) => !methodCanHaveBody(fetchOptions.method) && !Object.hasOwn(nextPageOptions, 'body') && Object.hasOwn(fetchOptions, 'body');
 
 /**
 Paginate through API responses using async iteration.
 
 By default, it automatically follows RFC 5988 Link headers with rel="next".
+
+Note: When pagination crosses to a different origin, inherited request headers are cleared before the next request is built. If you intentionally need headers on the new origin, return them explicitly from `pagination.paginate`.
 
 @param {RequestInfo | URL} input - The URL to fetch.
 @param {RequestInit & {pagination?: PaginationOptions, fetchFunction?: Function}} options - Fetch options plus pagination options.
@@ -346,11 +323,13 @@ export async function * paginate(input, options = {}) {
 
 		currentUrl = currentResponseUrl;
 
-		if (shouldStripInheritedSensitiveState(inheritedStateOrigin, currentResponseUrl)) {
-			const strippedState = stripInheritedSensitiveState(requestTemplate, currentFetchOptions);
-			requestTemplate = strippedState.requestTemplate;
-			currentFetchOptions = strippedState.fetchOptions;
-			inheritedStateOrigin = undefined;
+		if (shouldStripInheritedHeaderState(inheritedStateOrigin, currentResponseUrl)) {
+			({requestTemplate, currentFetchOptions, inheritedStateOrigin} = clearCrossOriginHeaderState(
+				fetchFunction,
+				requestTemplate ?? currentUrl,
+				requestTemplate,
+				currentFetchOptions,
+			));
 		}
 
 		// eslint-disable-next-line no-await-in-loop
@@ -416,11 +395,13 @@ export async function * paginate(input, options = {}) {
 			currentUrl = new URL(requestTemplate.url);
 		}
 
-		if (shouldStripInheritedSensitiveState(inheritedStateOrigin, nextRequestUrl)) {
-			const strippedState = stripInheritedSensitiveState(requestTemplate, currentFetchOptions);
-			requestTemplate = strippedState.requestTemplate;
-			currentFetchOptions = strippedState.fetchOptions;
-			inheritedStateOrigin = undefined;
+		if (shouldStripInheritedHeaderState(inheritedStateOrigin, nextRequestUrl)) {
+			({requestTemplate, currentFetchOptions, inheritedStateOrigin} = clearCrossOriginHeaderState(
+				fetchFunction,
+				requestTemplate ?? currentUrl,
+				requestTemplate,
+				currentFetchOptions,
+			));
 		}
 
 		const nextPageKeys = Object.keys(nextPageOptions);
@@ -435,7 +416,7 @@ export async function * paginate(input, options = {}) {
 				currentFetchOptions = normalizeFetchOptions(shouldClearInheritedBody(nextFetchOptions, restNextPageOptions) ? {...nextFetchOptions, body: undefined} : nextFetchOptions);
 			}
 
-			if (hasExplicitSensitiveState(restNextPageOptions)) {
+			if (hasExplicitHeaderState(restNextPageOptions)) {
 				inheritedStateOrigin = nextRequestUrl ?? inheritedStateOrigin;
 			}
 		}

@@ -87,6 +87,18 @@ test('retries on network error and succeeds', async t => {
 	t.is(mockFetch.callCount, 2);
 });
 
+test('retries on Failed to fetch hostname variant and succeeds', async t => {
+	const mockFetch = createMockFetch([
+		new TypeError('Failed to fetch (example.com)'),
+		createResponse(200),
+	]);
+	const fetchWithRetry = withRetry(mockFetch, {backoff: () => 0});
+
+	const response = await fetchWithRetry('https://example.com');
+	t.is(response.status, 200);
+	t.is(mockFetch.callCount, 2);
+});
+
 test('retries on network error and succeeds for Request input', async t => {
 	const mockFetch = createMockFetch([
 		networkError(),
@@ -1815,27 +1827,46 @@ test('statusCodes: [] means only network errors trigger retry', async t => {
 	t.is(mockFetch2.callCount, 2);
 });
 
-test('abort signal during async shouldRetry rejects on the next delay', async t => {
+test('abort signal during async shouldRetry rejects before shouldRetry settles', async t => {
 	const controller = new AbortController();
 	const mockFetch = createMockFetch([
 		createResponse(503),
 		createResponse(200),
 	]);
+	let resolveShouldRetry;
+	const shouldRetryStarted = new Promise(resolve => {
+		resolveShouldRetry = resolve;
+	});
 
 	const fetchWithRetry = withRetry(mockFetch, {
 		retries: 2,
 		backoff: () => 5000,
 		async shouldRetry() {
-			// Abort while shouldRetry is evaluating
-			controller.abort();
+			resolveShouldRetry();
+			await new Promise(resolve => {
+				setTimeout(resolve, 200);
+			});
 			return true;
 		},
 	});
 
-	await t.throwsAsync(
-		fetchWithRetry('https://example.com', {signal: controller.signal}),
-		{name: 'AbortError'},
-	);
+	const fetchPromise = fetchWithRetry('https://example.com', {signal: controller.signal});
+
+	await shouldRetryStarted;
+	controller.abort();
+
+	const raceWinner = await Promise.race([
+		fetchPromise.then(() => 'settled', () => 'settled'),
+		new Promise(resolve => {
+			setTimeout(() => {
+				resolve('timeout');
+			}, 50);
+		}),
+	]);
+
+	t.is(raceWinner, 'settled');
+
+	await t.throwsAsync(fetchPromise, {name: 'AbortError'});
 
 	t.is(mockFetch.callCount, 1);
 });

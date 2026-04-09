@@ -1,7 +1,7 @@
 import {copyFetchMetadata, resolveRequestUrlSymbol} from './utilities.js';
 
 /**
-Wraps a fetch function to resolve relative URLs against a base URL. Only string-based relative URLs are resolved; absolute URLs and URL objects are passed through unchanged.
+Wraps a fetch function to resolve relative URLs against a base URL. Only string-based relative URLs are resolved; absolute URLs and URL objects are passed through unchanged. Protocol-relative URLs are rejected.
 
 @param {typeof fetch} fetchFunction - The fetch function to wrap (usually the global `fetch`).
 @param {URL | string} baseUrl - The base URL to resolve relative URLs against.
@@ -33,10 +33,14 @@ export function withBaseUrl(fetchFunction, baseUrl) {
 		}
 
 		if (urlOrRequest === '') {
-			return baseUrlString;
+			return new URL(urlOrRequest, getBaseUrlObject()).href;
 		}
 
-		if (/^\/\/[^/]/.test(urlOrRequest) || /^[?#]/.test(urlOrRequest)) {
+		if (/^\/\/[^/]/.test(urlOrRequest)) {
+			throw new TypeError('Protocol-relative URLs are unsupported.');
+		}
+
+		if (/^[?#]/.test(urlOrRequest)) {
 			return new URL(urlOrRequest, getBaseUrlObject()).href;
 		}
 

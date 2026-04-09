@@ -1,7 +1,7 @@
 /**
 Wraps a fetch function to automatically retry failed requests.
 
-Retries on [network errors](https://github.com/sindresorhus/is-network-error) and configurable HTTP status codes. Only retries idempotent methods by default (GET, HEAD, PUT, DELETE, OPTIONS, TRACE). Uses exponential backoff with jitter by default. Respects the `Retry-After` response header when present.
+Retries on network errors and configurable HTTP status codes. Only retries idempotent methods by default (GET, HEAD, PUT, DELETE, OPTIONS, TRACE). Uses exponential backoff with jitter by default. Respects the `Retry-After` response header when present.
 
 POST and PATCH are not retried by default because they are not idempotent. Add them to `methods` if your endpoints are safe to retry.
 

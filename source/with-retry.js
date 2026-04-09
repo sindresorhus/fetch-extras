@@ -1,4 +1,4 @@
-import isNetworkError from 'is-network-error';
+import isNetworkError from './is-network-error.js';
 import {
 	copyFetchMetadata,
 	delay,
@@ -10,6 +10,7 @@ import {
 	resolveRequestBodyOptions,
 	resolveRequestHeaders,
 	resolveRequestUrl,
+	waitForAbortable,
 } from './utilities.js';
 
 const defaultRetriableMethods = new Set(['GET', 'HEAD', 'PUT', 'DELETE', 'OPTIONS', 'TRACE']);
@@ -38,7 +39,7 @@ function parseRetryAfter(response) {
 /**
 Wraps a fetch function to automatically retry failed requests.
 
-Retries on [network errors](https://github.com/sindresorhus/is-network-error) and configurable HTTP status codes. Only retries idempotent methods by default (GET, HEAD, PUT, DELETE, OPTIONS, TRACE). Uses exponential backoff with jitter by default. Respects the `Retry-After` response header when present.
+Retries on network errors and configurable HTTP status codes. Only retries idempotent methods by default (GET, HEAD, PUT, DELETE, OPTIONS, TRACE). Uses exponential backoff with jitter by default. Respects the `Retry-After` response header when present.
 
 When all retries are exhausted, the last response is returned (for HTTP status retries) or the last error is thrown (for network errors).
 
@@ -158,7 +159,10 @@ export function withRetry(fetchFunction, options = {}) {
 					throw error;
 				}
 
-				if (!await shouldRetry({error, attemptNumber: attempt + 1, retriesLeft: retries - attempt})) {
+				if (!await waitForAbortable(
+					() => shouldRetry({error, attemptNumber: attempt + 1, retriesLeft: retries - attempt}),
+					attemptSignal,
+				)) {
 					throw error;
 				}
 
@@ -177,7 +181,10 @@ export function withRetry(fetchFunction, options = {}) {
 
 			let shouldRetryResponse;
 			try {
-				shouldRetryResponse = await shouldRetry({response, attemptNumber: attempt + 1, retriesLeft: retries - attempt});
+				shouldRetryResponse = await waitForAbortable(
+					() => shouldRetry({response, attemptNumber: attempt + 1, retriesLeft: retries - attempt}),
+					attemptSignal,
+				);
 			} catch (error) {
 				await discardBody(response.body);
 				throw error;

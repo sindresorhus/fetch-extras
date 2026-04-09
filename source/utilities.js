@@ -213,6 +213,32 @@ export function delay(milliseconds, {signal} = {}) {
 	});
 }
 
+export async function waitForAbortable(callback, signal) {
+	signal?.throwIfAborted();
+
+	if (!signal) {
+		return callback();
+	}
+
+	let abort;
+	const abortPromise = new Promise((_resolve, reject) => {
+		abort = () => {
+			reject(signal.reason);
+		};
+
+		signal.addEventListener('abort', abort, {once: true});
+	});
+
+	try {
+		return await Promise.race([
+			callback(),
+			abortPromise,
+		]);
+	} finally {
+		signal.removeEventListener('abort', abort);
+	}
+}
+
 export function enqueueAbortable(queue, {signal, onAbort, onEnqueue} = {}) {
 	return new Promise((resolve, reject) => {
 		let isSettled = false;

@@ -1,6 +1,7 @@
 import {
 	copyFetchMetadata,
 	defersFetchStartSymbol,
+	hasHeaders,
 	notifyFetchStartSymbol,
 	resolveRequestHeadersSymbol,
 	resolveRequestUrl,
@@ -19,12 +20,15 @@ function getHeaders(urlOrRequest, options) {
 }
 
 function getRequestContext(fetchFunction, urlOrRequest, options) {
+	const headers = getHeaders.call(fetchFunction, urlOrRequest, options);
+
 	return {
 		method: (options.method ?? (urlOrRequest instanceof Request ? urlOrRequest.method : 'GET')).toUpperCase(),
 		url: resolveRequestUrl(fetchFunction, urlOrRequest),
 		cacheMode: options.cache ?? (urlOrRequest instanceof Request ? urlOrRequest.cache : undefined),
 		signal: options.signal ?? (urlOrRequest instanceof Request ? urlOrRequest.signal : undefined),
-		isRangedRequest: getHeaders.call(fetchFunction, urlOrRequest, options).has('range'),
+		isRangedRequest: headers.has('range'),
+		hasRequestHeaders: hasHeaders(headers),
 	};
 }
 
@@ -85,7 +89,7 @@ function evictExpiredEntries(cache, state, retainKey) {
 	return currentTime;
 }
 
-function getCachedResponse(entry, cacheMode, currentTime, isRangedRequest) {
+function getCachedResponse({entry, cacheMode, currentTime, isRangedRequest}) {
 	if (!entry?.response || isRangedRequest || cacheMode === 'no-store') {
 		return;
 	}
@@ -109,9 +113,17 @@ export function withCache(fetchFunction, {ttl}) {
 	const resources = {cache, state};
 
 	const fetchWithCache = async (urlOrRequest, options = {}) => {
-		const {method, url, cacheMode, signal, isRangedRequest} = getRequestContext(fetchFunction, urlOrRequest, options);
+		const {
+			method,
+			url,
+			cacheMode,
+			signal,
+			isRangedRequest,
+			hasRequestHeaders,
+		} = getRequestContext(fetchFunction, urlOrRequest, options);
 		const retainStaleEntry = cacheMode === 'force-cache' || cacheMode === 'only-if-cached';
 		const currentTime = evictExpiredEntries(cache, state, retainStaleEntry ? url : undefined);
+		const isCacheableRequest = !isRangedRequest && !hasRequestHeaders;
 
 		// Non-GET requests pass through; unsafe methods also invalidate cache
 		if (method !== 'GET') {
@@ -146,7 +158,14 @@ export function withCache(fetchFunction, {ttl}) {
 		signal?.throwIfAborted();
 
 		const entry = cache.get(url);
-		const cachedResponse = getCachedResponse(entry, cacheMode, currentTime, isRangedRequest);
+		const cachedResponse = isCacheableRequest
+			? getCachedResponse({
+				entry,
+				cacheMode,
+				currentTime,
+				isRangedRequest,
+			})
+			: undefined;
 		if (cachedResponse) {
 			return cachedResponse;
 		}
@@ -163,7 +182,7 @@ export function withCache(fetchFunction, {ttl}) {
 			// Only cache successful responses.
 			if (
 				response.ok
-				&& !isRangedRequest
+				&& isCacheableRequest
 				&& !isPartialResponse
 				&& cacheMode !== 'no-store'
 				&& generation === getGeneration(cache, state, url)

@@ -9,6 +9,8 @@ Build tiny, focused HTTP clients by composing only the features you need on top 
 ## Highlights
 
 - **Composable** — Each `with*` function adds a single capability. Stack them to build exactly the client you need.
+- **Works everywhere** — Browsers, Node.js, Deno, Bun, Cloudflare Workers, etc.
+- **Zero dependencies**
 - **Standard `fetch`** — The input and output are always a plain `fetch` function. Your code stays portable and familiar.
 - **Tree-shakeable** — Only the utilities you import end up in your bundle.
 - **TypeScript** — Full type definitions with strong generics.
@@ -66,7 +68,7 @@ Listed in the recommended wrapping order for use with [`pipeline`](docs/pipeline
 - [`withRateLimit`](docs/with-rate-limit.md) - Enforce client-side rate limiting with a sliding window
 - [`withConcurrency`](docs/with-concurrency.md) - Cap how many requests can run simultaneously
 - [`withDeduplication`](docs/with-deduplication.md) - Collapse concurrent identical GET requests into a single call
-- [`withCache`](docs/with-cache.md) - In-memory GET response caching with a TTL
+- [`withCache`](docs/with-cache.md) - In-memory caching for plain unconditional GET responses with a TTL
 - [`withDownloadProgress`](docs/with-download-progress.md) - Track download progress
 - [`withUploadProgress`](docs/with-upload-progress.md) - Track upload progress
 - [`withRetry`](docs/with-retry.md) - Retry failed requests with exponential backoff
@@ -91,6 +93,10 @@ Listed in the recommended wrapping order for use with [`pipeline`](docs/pipeline
 ### How is this different from Ky?
 
 [Ky](https://github.com/sindresorhus/ky) is a full-featured HTTP client with its own API (`ky.get()`, `.json()`, etc.). This package instead gives you individual utilities that wrap the standard `fetch` function. You pick only what you need and compose them together. If you want a batteries-included client, use Ky. If you want to stay close to the `fetch` API while adding specific capabilities, use this.
+
+### How do I use a proxy?
+
+This package wraps the standard `fetch` API, so proxy support comes from the runtime. In Node.js, use the [`--use-env-proxy`](https://nodejs.org/learn/http/enterprise-network-configuration) flag.
 
 ## Related
 

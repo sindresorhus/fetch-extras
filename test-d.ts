@@ -12,6 +12,7 @@ import {
 	withRateLimit,
 	withSearchParameters,
 	withTimeout,
+	withTokenRefresh,
 	type StandardSchemaV1,
 	type StandardSchemaV1InferOutput,
 	type StandardSchemaV1Issue,
@@ -86,6 +87,12 @@ const rateLimitedResponse: Promise<Response> = rateLimitedFetch('/api');
 
 const cachedFetch = withCache(fetch, {ttl: 60_000});
 const cachedResponse: Promise<Response> = cachedFetch('/api');
+const tokenRefreshFetch = withTokenRefresh(fetch, {
+	refreshToken() {
+		return 'sync-token';
+	},
+});
+const tokenRefreshResponse: Promise<Response> = tokenRefreshFetch('/api');
 const readonlySearchParameters = [['apiKey', 'token']] as const;
 const fetchWithReadonlySearchParameters = withSearchParameters(fetch, readonlySearchParameters);
 const readonlySearchParametersResponse: Promise<Response> = fetchWithReadonlySearchParameters('/api');
@@ -169,6 +176,7 @@ const wrappedSingleArgumentFetchResponse: Promise<Response> = wrappedSingleArgum
 void wrappedSingleArgumentFetch('/single', {body: {name: 'Alice'}});
 
 void cachedResponse;
+void tokenRefreshResponse;
 void deduplicatedResponse;
 void readonlySearchParametersResponse;
 void jsonResponse;

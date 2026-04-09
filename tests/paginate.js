@@ -573,7 +573,7 @@ test.serial('paginate - drops Authorization for URL input when the next page cha
 	]);
 });
 
-test.serial('paginate - preserves non-Authorization headers when the next page changes origin', async t => {
+test.serial('paginate - drops inherited headers when the next page changes origin', async t => {
 	const {seenRequests, fetchFunction} = createRecordedRequestFetch({
 		nextLink: `<${crossOriginNextUrl}>; rel="next"`,
 		recordHeaders: ['x-api-key', 'private-token'],
@@ -598,8 +598,8 @@ test.serial('paginate - preserves non-Authorization headers when the next page c
 		{
 			url: 'https://evil.example/?page=2',
 			authorization: null,
-			'x-api-key': 'secret-key',
-			'private-token': 'secret-token',
+			'x-api-key': null,
+			'private-token': null,
 		},
 	]);
 });
@@ -628,7 +628,7 @@ test.serial('paginate - drops Authorization case-insensitively when the next pag
 		{
 			url: 'https://evil.example/?page=2',
 			authorization: null,
-			'x-api-key': 'secret-key',
+			'x-api-key': null,
 		},
 	]);
 });
@@ -686,6 +686,81 @@ test.serial('paginate - preserves explicit Authorization overrides on cross-orig
 	]);
 });
 
+test.serial('paginate - preserves inherited headers on same-origin next pages', async t => {
+	const {seenRequests, fetchFunction} = createRecordedRequestFetch({
+		nextLink: '<https://api.example.com/?page=2>; rel="next"',
+		recordHeaders: ['x-api-key', 'accept'],
+	});
+
+	const items = await paginate.all('https://api.example.com/?page=1', {
+		headers: {
+			'x-api-key': 'secret-key',
+			accept: 'application/json',
+		},
+		fetchFunction,
+	});
+
+	t.deepEqual(items, [1, 2]);
+	t.deepEqual(seenRequests, [
+		{
+			url: 'https://api.example.com/?page=1',
+			authorization: null,
+			'x-api-key': 'secret-key',
+			accept: 'application/json',
+		},
+		{
+			url: 'https://api.example.com/?page=2',
+			authorization: null,
+			'x-api-key': 'secret-key',
+			accept: 'application/json',
+		},
+	]);
+});
+
+test.serial('paginate - preserves explicit next-page headers while dropping inherited cross-origin headers', async t => {
+	const {seenRequests, fetchFunction} = createRecordedRequestFetch({
+		recordHeaders: ['x-api-key', 'accept'],
+	});
+
+	const items = await paginate.all('https://api.example.com/?page=1', {
+		headers: {
+			'x-api-key': 'secret-key',
+			accept: 'application/json',
+		},
+		fetchFunction,
+		pagination: {
+			paginate({response}) {
+				if (response.url !== 'https://api.example.com/?page=1') {
+					return false;
+				}
+
+				return {
+					url: new URL(crossOriginNextUrl),
+					headers: {
+						'x-api-key': 'replacement-key',
+					},
+				};
+			},
+		},
+	});
+
+	t.deepEqual(items, [1, 2]);
+	t.deepEqual(seenRequests, [
+		{
+			url: 'https://api.example.com/?page=1',
+			authorization: null,
+			'x-api-key': 'secret-key',
+			accept: 'application/json',
+		},
+		{
+			url: 'https://evil.example/?page=2',
+			authorization: null,
+			'x-api-key': 'replacement-key',
+			accept: null,
+		},
+	]);
+});
+
 test.serial('paginate - does not reapply withHeaders Authorization defaults after cross-origin pagination strips them', async t => {
 	const {seenRequests, fetchFunction} = createRecordedRequestFetch({
 		nextLink: `<${crossOriginNextUrl}>; rel="next"`,
@@ -711,7 +786,7 @@ test.serial('paginate - does not reapply withHeaders Authorization defaults afte
 	]);
 });
 
-test.serial('paginate - preserves non-sensitive withHeaders defaults after a cross-origin redirect strips sensitive defaults', async t => {
+test.serial('paginate - drops inherited withHeaders defaults after a cross-origin redirect', async t => {
 	const seenRequests = [];
 	const fetchWithHeaders = withHeaders(async (input, options) => {
 		const request = input instanceof Request ? input : new Request(input, options);
@@ -760,8 +835,8 @@ test.serial('paginate - preserves non-sensitive withHeaders defaults after a cro
 		{
 			url: 'https://cdn.example.net/?page=2',
 			authorization: null,
-			accept: 'application/json',
-			xApiVersion: '2026-03',
+			accept: null,
+			xApiVersion: null,
 		},
 	]);
 });
@@ -2911,7 +2986,7 @@ test.serial('paginate - drops inherited Authorization case-insensitively on cros
 		{
 			url: 'https://evil.example/api?page=2',
 			authorization: null,
-			xApiKey: 'secret-key',
+			xApiKey: null,
 		},
 	]);
 });
@@ -4390,7 +4465,7 @@ test.serial('paginate - preserves inherited sensitive state after a redirected s
 	]);
 });
 
-test.serial('paginate - preserves non-sensitive content headers after a redirected bodyless request', async t => {
+test.serial('paginate - drops inherited content headers after a redirected bodyless request', async t => {
 	const seenRequests = [];
 
 	const items = await paginate.all('https://api.example.com/?page=1', {
@@ -4441,8 +4516,8 @@ test.serial('paginate - preserves non-sensitive content headers after a redirect
 		{
 			url: 'https://cdn.example.net/?page=2',
 			authorization: null,
-			contentType: 'application/json',
-			contentLanguage: 'en',
+			contentType: null,
+			contentLanguage: null,
 		},
 	]);
 });

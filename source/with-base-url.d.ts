@@ -1,7 +1,7 @@
 /**
 Returns a wrapped fetch function that resolves relative URLs against a base URL. Useful for API clients with a consistent base URL.
 
-Only string-based relative URLs are resolved against the base URL. Absolute URLs and URL objects are passed through unchanged. Relative paths are resolved against the base URL's pathname, while query-only and fragment-only inputs keep normal URL semantics.
+Only string-based relative URLs are resolved against the base URL. Absolute URLs and URL objects are passed through unchanged. Protocol-relative inputs like `//cdn.example.com/file.js` are rejected to avoid escaping the configured origin. Relative paths are resolved against the base URL's pathname, while query-only and fragment-only inputs keep normal URL semantics.
 
 Can be combined with other `with*` functions.
 

@@ -234,6 +234,17 @@ test('withBaseUrl - handles empty string URL', async t => {
 	t.is(response.url, 'https://api.example.com/v1/');
 });
 
+test('withBaseUrl - empty string URL validates the base URL', async t => {
+	const fetchWithBaseUrl = withBaseUrl(mockFetch, 'not a valid url');
+
+	const error = await t.throwsAsync(
+		() => fetchWithBaseUrl(''),
+		{instanceOf: TypeError},
+	);
+
+	t.true(error.message.includes('Invalid URL'));
+});
+
 test('withBaseUrl - throws on invalid base URL', async t => {
 	const fetchWithBaseUrl = withBaseUrl(mockFetch, 'not a valid url');
 
@@ -273,11 +284,15 @@ test('withBaseUrl - multiple trailing slashes in base URL', async t => {
 	t.is(response.url, 'https://api.example.com/v1//users');
 });
 
-test('withBaseUrl - double-slash at start resolves against the base URL scheme', async t => {
+test('withBaseUrl - rejects protocol-relative URLs', async t => {
 	const fetchWithBaseUrl = withBaseUrl(mockFetch, 'https://api.example.com');
-	const response = await fetchWithBaseUrl('//other.example.com/users');
 
-	t.is(response.url, 'https://other.example.com/users');
+	const error = await t.throwsAsync(
+		() => fetchWithBaseUrl('//other.example.com/users'),
+		{instanceOf: TypeError},
+	);
+
+	t.is(error.message, 'Protocol-relative URLs are unsupported.');
 });
 
 test('withBaseUrl - base URL with port number', async t => {
@@ -313,6 +328,13 @@ test('withBaseUrl - base URL fragment is stripped', async t => {
 	const response = await fetchWithBaseUrl('users');
 
 	t.is(response.url, 'https://api.example.com/v1/users');
+});
+
+test('withBaseUrl - empty string URL normalizes the base URL', async t => {
+	const fetchWithBaseUrl = withBaseUrl(mockFetch, 'https://api.example.com/v1#old');
+	const response = await fetchWithBaseUrl('');
+
+	t.is(response.url, 'https://api.example.com/v1');
 });
 
 test('withBaseUrl - input with only query parameters', async t => {

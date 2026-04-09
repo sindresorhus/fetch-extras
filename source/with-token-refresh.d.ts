@@ -67,6 +67,6 @@ export function withTokenRefresh(
 		/**
 		Called when a 401 response is received. Should return the new token string.
 		*/
-		refreshToken: () => Promise<string>;
+		refreshToken: () => string | Promise<string>;
 	}
 ): typeof fetch;
