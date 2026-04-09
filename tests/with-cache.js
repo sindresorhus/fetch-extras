@@ -28,6 +28,15 @@ const createMockFetch = (status = 200) => {
 	return mockFetch;
 };
 
+const createOptionSensitiveFetch = optionName => {
+	let callCount = 0;
+
+	return async (_url, options = {}) => Response.json({
+		callCount: ++callCount,
+		[optionName]: options[optionName] ?? '__undefined__',
+	});
+};
+
 test('returns cached response for repeated GET requests', async t => {
 	const mockFetch = createMockFetch();
 	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
@@ -245,6 +254,157 @@ test('GET requests with custom credential headers are not cached', async t => {
 		callCount: 2,
 		apiKey: 'bob',
 	});
+});
+
+test('GET requests with credentials: include are not cached', async t => {
+	const cachedFetch = withCache(createOptionSensitiveFetch('credentials'), {ttl: 60_000});
+
+	const firstResponse = await cachedFetch('https://example.com/api', {
+		credentials: 'include',
+	});
+	const secondResponse = await cachedFetch('https://example.com/api');
+
+	t.deepEqual(await firstResponse.json(), {
+		callCount: 1,
+		credentials: 'include',
+	});
+	t.deepEqual(await secondResponse.json(), {
+		callCount: 2,
+		credentials: '__undefined__',
+	});
+});
+
+test('GET requests with integrity metadata are not cached', async t => {
+	const cachedFetch = withCache(createOptionSensitiveFetch('integrity'), {ttl: 60_000});
+
+	const firstResponse = await cachedFetch('https://example.com/api', {
+		integrity: 'sha256-test',
+	});
+	const secondResponse = await cachedFetch('https://example.com/api');
+
+	t.deepEqual(await firstResponse.json(), {
+		callCount: 1,
+		integrity: 'sha256-test',
+	});
+	t.deepEqual(await secondResponse.json(), {
+		callCount: 2,
+		integrity: '__undefined__',
+	});
+});
+
+test('GET requests with mode metadata are not cached', async t => {
+	const cachedFetch = withCache(createOptionSensitiveFetch('mode'), {ttl: 60_000});
+
+	const firstResponse = await cachedFetch('https://example.com/api', {
+		mode: 'same-origin',
+	});
+	const secondResponse = await cachedFetch('https://example.com/api');
+
+	t.deepEqual(await firstResponse.json(), {
+		callCount: 1,
+		mode: 'same-origin',
+	});
+	t.deepEqual(await secondResponse.json(), {
+		callCount: 2,
+		mode: '__undefined__',
+	});
+});
+
+test('GET requests with redirect metadata are not cached', async t => {
+	const cachedFetch = withCache(createOptionSensitiveFetch('redirect'), {ttl: 60_000});
+
+	const firstResponse = await cachedFetch('https://example.com/api', {
+		redirect: 'manual',
+	});
+	const secondResponse = await cachedFetch('https://example.com/api');
+
+	t.deepEqual(await firstResponse.json(), {
+		callCount: 1,
+		redirect: 'manual',
+	});
+	t.deepEqual(await secondResponse.json(), {
+		callCount: 2,
+		redirect: '__undefined__',
+	});
+});
+
+test('GET requests with referrer policy metadata are not cached', async t => {
+	const cachedFetch = withCache(createOptionSensitiveFetch('referrerPolicy'), {ttl: 60_000});
+
+	const firstResponse = await cachedFetch('https://example.com/api', {
+		referrerPolicy: 'no-referrer',
+	});
+	const secondResponse = await cachedFetch('https://example.com/api');
+
+	t.deepEqual(await firstResponse.json(), {
+		callCount: 1,
+		referrerPolicy: 'no-referrer',
+	});
+	t.deepEqual(await secondResponse.json(), {
+		callCount: 2,
+		referrerPolicy: '__undefined__',
+	});
+});
+
+test('GET requests with referrer metadata are not cached', async t => {
+	const cachedFetch = withCache(createOptionSensitiveFetch('referrer'), {ttl: 60_000});
+
+	const firstResponse = await cachedFetch('https://example.com/api', {
+		referrer: 'https://sensitive.example/source',
+	});
+	const secondResponse = await cachedFetch('https://example.com/api');
+
+	t.deepEqual(await firstResponse.json(), {
+		callCount: 1,
+		referrer: 'https://sensitive.example/source',
+	});
+	t.deepEqual(await secondResponse.json(), {
+		callCount: 2,
+		referrer: '__undefined__',
+	});
+});
+
+test('Request object with non-default credentials is not cached', async t => {
+	let callCount = 0;
+
+	const mockFetch = async request => {
+		callCount++;
+		return Response.json({
+			callCount,
+			credentials: request.credentials,
+		});
+	};
+
+	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+
+	const firstResponse = await cachedFetch(new Request('https://example.com/api', {
+		credentials: 'include',
+	}));
+	const secondResponse = await cachedFetch(new Request('https://example.com/api', {
+		credentials: 'include',
+	}));
+
+	t.deepEqual(await firstResponse.json(), {
+		callCount: 1,
+		credentials: 'include',
+	});
+	t.deepEqual(await secondResponse.json(), {
+		callCount: 2,
+		credentials: 'include',
+	});
+});
+
+test('cached plain response is not served for request with non-default metadata', async t => {
+	const mockFetch = createMockFetch();
+	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+
+	// First: plain request gets cached
+	await cachedFetch('https://example.com/api');
+	t.is(mockFetch.callCount, 1);
+
+	// Second: same URL but with non-default credentials must bypass cache
+	await cachedFetch('https://example.com/api', {credentials: 'include'});
+	t.is(mockFetch.callCount, 2);
 });
 
 test('Request inputs with Authorization headers are not cached', async t => {

@@ -21,7 +21,7 @@ This is a small in-memory cache, not a full HTTP cache. It memoizes plain uncond
 A wrapped fetch function that caches GET responses.
 
 > [!NOTE]
-> The cache key is the URL only, so `withCache()` only caches plain unconditional GET requests without request headers. If a GET request carries any explicit or inherited headers, including auth, cookies, or validators like `If-None-Match`, it is treated as uncacheable and bypasses this wrapper's in-memory cache. With `cache: 'only-if-cached'`, that still means a cache miss and the wrapper returns its synthetic `504` response.
+> The cache key is the URL only, so `withCache()` only caches plain unconditional GET requests in the default fetch mode. If a GET request carries any explicit or inherited headers, including auth, cookies, or validators like `If-None-Match`, or it changes request metadata like `credentials`, `integrity`, `mode`, `redirect`, `referrer`, or `referrerPolicy`, it is treated as uncacheable and bypasses this wrapper's in-memory cache. With `cache: 'only-if-cached'`, that still means a cache miss and the wrapper returns its synthetic `504` response.
 
 > [!TIP]
 > Place `withCache` after `withBaseUrl` in a pipeline so the cache key is the resolved absolute URL, and before `withHttpError` so cached responses still get error-checked.

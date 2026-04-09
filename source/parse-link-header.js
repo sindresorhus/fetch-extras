@@ -1,3 +1,5 @@
+const tokenPattern = /^[!#$%&'*+.^`|~\w-]+$/;
+
 function splitHeaderValue(value, separator) {
 	const parts = [];
 	let startIndex = 0;
@@ -51,6 +53,10 @@ function splitHeaderValue(value, separator) {
 		}
 	}
 
+	if (insideUrl || insideQuotes || isEscaped) {
+		throw new Error('Invalid Link header format');
+	}
+
 	parts.push(value.slice(startIndex));
 
 	return parts;
@@ -97,8 +103,14 @@ export default function parseLinkHeader(linkHeader) {
 				value = trimmedParameter.slice(equalIndex + 1).trim();
 			}
 
+			if (!tokenPattern.test(name)) {
+				throw new Error(`Invalid Link header format: ${trimmedParameter}`);
+			}
+
 			if (value.startsWith('"') && value.endsWith('"')) {
 				value = value.slice(1, -1).replaceAll(/\\(.)/g, '$1');
+			} else if (value !== '' && !tokenPattern.test(value)) {
+				throw new Error(`Invalid Link header format: ${trimmedParameter}`);
 			}
 
 			if (name in parameters) {

@@ -4,7 +4,7 @@
 
 Wraps a fetch function to automatically retry failed requests.
 
-Retries on network errors and configurable HTTP status codes. Only retries idempotent methods by default (GET, HEAD, PUT, DELETE, OPTIONS, TRACE). Uses exponential backoff with jitter by default. Respects the `Retry-After` response header when present.
+Retries on network errors and configurable HTTP status codes. Only retries idempotent methods by default (GET, HEAD, PUT, DELETE, OPTIONS, TRACE). Uses exponential backoff with jitter by default. Respects the `Retry-After` response header when present, and ignores malformed values by falling back to `backoff`.
 
 When all retries are exhausted, the last response is returned (for HTTP status retries) or the last error is thrown (for network errors).
 

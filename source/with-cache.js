@@ -8,6 +8,18 @@ import {
 } from './utilities.js';
 
 const nonInvalidatingMethods = new Set(['HEAD', 'OPTIONS', 'TRACE']);
+const defaultCacheableRequestState = (() => {
+	const request = new Request('https://example.com');
+
+	return {
+		credentials: request.credentials,
+		integrity: request.integrity,
+		mode: request.mode,
+		redirect: request.redirect,
+		referrer: request.referrer,
+		referrerPolicy: request.referrerPolicy,
+	};
+})();
 
 function getHeaders(urlOrRequest, options) {
 	const resolvedHeaders = this?.[resolveRequestHeadersSymbol]?.(urlOrRequest, options);
@@ -17,6 +29,18 @@ function getHeaders(urlOrRequest, options) {
 	}
 
 	return new Headers(options.headers ?? (urlOrRequest instanceof Request ? urlOrRequest.headers : undefined));
+}
+
+function hasNonDefaultRequestState(urlOrRequest, options) {
+	const request = urlOrRequest instanceof Request ? urlOrRequest : undefined;
+
+	for (const [key, defaultValue] of Object.entries(defaultCacheableRequestState)) {
+		if ((options[key] ?? request?.[key] ?? defaultValue) !== defaultValue) {
+			return true;
+		}
+	}
+
+	return false;
 }
 
 function getRequestContext(fetchFunction, urlOrRequest, options) {
@@ -29,6 +53,7 @@ function getRequestContext(fetchFunction, urlOrRequest, options) {
 		signal: options.signal ?? (urlOrRequest instanceof Request ? urlOrRequest.signal : undefined),
 		isRangedRequest: headers.has('range'),
 		hasRequestHeaders: hasHeaders(headers),
+		hasNonDefaultRequestState: hasNonDefaultRequestState(urlOrRequest, options),
 	};
 }
 
@@ -120,10 +145,11 @@ export function withCache(fetchFunction, {ttl}) {
 			signal,
 			isRangedRequest,
 			hasRequestHeaders,
+			hasNonDefaultRequestState,
 		} = getRequestContext(fetchFunction, urlOrRequest, options);
 		const retainStaleEntry = cacheMode === 'force-cache' || cacheMode === 'only-if-cached';
 		const currentTime = evictExpiredEntries(cache, state, retainStaleEntry ? url : undefined);
-		const isCacheableRequest = !isRangedRequest && !hasRequestHeaders;
+		const isCacheableRequest = !isRangedRequest && !hasRequestHeaders && !hasNonDefaultRequestState;
 
 		// Non-GET requests pass through; unsafe methods also invalidate cache
 		if (method !== 'GET') {

@@ -8,7 +8,7 @@ Use a Standard Schema compatible validator such as [Zod](https://zod.dev) (v3.24
 
 Unlike other wrappers, this one returns parsed data instead of a `Response`, so it should be placed last in a [`pipeline`](pipeline.md).
 
-Empty responses are not special-cased. If the response body is empty, including `204`, `205`, or `HEAD` responses, this wrapper throws the same `SyntaxError` as `Response.json()`.
+Empty responses are not special-cased. If the response body is empty, including `204`, `205`, or `HEAD` responses, this wrapper throws the same `SyntaxError` as `Response.json()`. This is intentional: returning `null` would widen every call site's return type to `T | null`, forcing unnecessary null-checks. If your endpoint can return empty responses, handle that before this wrapper in the pipeline.
 
 ## Parameters
 

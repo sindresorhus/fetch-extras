@@ -4546,6 +4546,83 @@ test('parseLinkHeader - throws for invalid format', t => {
 	);
 });
 
+test('parseLinkHeader - throws for unterminated quoted rel value', t => {
+	t.throws(
+		() => parseLinkHeader('<http://example.com/?page=2>; rel="next'),
+		{message: /Invalid Link header format/},
+	);
+});
+
+test('parseLinkHeader - throws for unterminated quoted parameter before the next entry', t => {
+	t.throws(
+		() => parseLinkHeader('<http://example.com/?page=2>; title="unterminated, <http://example.com/?page=3>; rel="next"'),
+		{message: /Invalid Link header format/},
+	);
+});
+
+test('parseLinkHeader - throws for trailing unterminated quoted parameter', t => {
+	t.throws(
+		() => parseLinkHeader('<http://example.com/?page=2>; rel="next"; title="unterminated'),
+		{message: /Invalid Link header format/},
+	);
+});
+
+test('parseLinkHeader - throws for dangling escape in quoted parameter', t => {
+	t.throws(
+		() => parseLinkHeader('<http://example.com/?page=2>; rel="next"; title="unterminated\\'),
+		{message: /Invalid Link header format/},
+	);
+});
+
+test('parseLinkHeader - throws for empty parameter name', t => {
+	t.throws(
+		() => parseLinkHeader('<http://example.com/?page=2>; ="next"'),
+		{message: /Invalid Link header format/},
+	);
+});
+
+test('parseLinkHeader - throws for empty parameter name after a valid parameter', t => {
+	t.throws(
+		() => parseLinkHeader('<http://example.com/?page=2>; rel=next; =foo'),
+		{message: /Invalid Link header format/},
+	);
+});
+
+test('parseLinkHeader - throws for whitespace inside a parameter name', t => {
+	t.throws(
+		() => parseLinkHeader('<http://example.com/?page=2>; re l=next'),
+		{message: /Invalid Link header format/},
+	);
+});
+
+test('parseLinkHeader - throws for quoted parameter names', t => {
+	t.throws(
+		() => parseLinkHeader('<http://example.com/?page=2>; "rel"=next'),
+		{message: /Invalid Link header format/},
+	);
+});
+
+test('parseLinkHeader - throws for invalid token characters in an unquoted value', t => {
+	t.throws(
+		() => parseLinkHeader('<http://example.com/?page=2>; rel=@next'),
+		{message: /Invalid Link header format/},
+	);
+});
+
+test('parseLinkHeader - throws for invalid delimiters in an unquoted value', t => {
+	t.throws(
+		() => parseLinkHeader('<http://example.com/?page=2>; rel=n(ext'),
+		{message: /Invalid Link header format/},
+	);
+});
+
+test('parseLinkHeader - throws for unterminated URL angle bracket', t => {
+	t.throws(
+		() => parseLinkHeader('<http://example.com/?page=2'),
+		{message: /Invalid Link header format/},
+	);
+});
+
 test('parseLinkHeader - parses link with no parameters', t => {
 	const links = parseLinkHeader('<http://example.com/>');
 	t.deepEqual(links, [{url: 'http://example.com/', parameters: {}}]);

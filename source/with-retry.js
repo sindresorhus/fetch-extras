@@ -20,14 +20,13 @@ const defaultBackoff = attemptNumber =>
 	Math.min(1000 * (2 ** (attemptNumber - 1)), 30_000) * (0.5 + (Math.random() * 0.5));
 
 function parseRetryAfter(response) {
-	const header = response.headers.get('retry-after');
+	const header = response.headers.get('retry-after')?.trim();
 	if (!header) {
 		return;
 	}
 
-	const seconds = Number(header);
-	if (Number.isFinite(seconds)) {
-		return seconds * 1000;
+	if (/^\d+$/.test(header)) {
+		return Number(header) * 1000;
 	}
 
 	const date = Date.parse(header);
@@ -39,7 +38,7 @@ function parseRetryAfter(response) {
 /**
 Wraps a fetch function to automatically retry failed requests.
 
-Retries on network errors and configurable HTTP status codes. Only retries idempotent methods by default (GET, HEAD, PUT, DELETE, OPTIONS, TRACE). Uses exponential backoff with jitter by default. Respects the `Retry-After` response header when present.
+Retries on network errors and configurable HTTP status codes. Only retries idempotent methods by default (GET, HEAD, PUT, DELETE, OPTIONS, TRACE). Uses exponential backoff with jitter by default. Respects the `Retry-After` response header when present, and ignores malformed values by falling back to `backoff`.
 
 When all retries are exhausted, the last response is returned (for HTTP status retries) or the last error is thrown (for network errors).
 

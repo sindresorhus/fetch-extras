@@ -1638,6 +1638,78 @@ test('Retry-After with invalid string falls back to backoff', async t => {
 	t.true(backoffCalled);
 });
 
+test('Retry-After with fractional seconds falls back to backoff', async t => {
+	let backoffCalled = false;
+	const mockFetch = createMockFetch([
+		createResponse(429, {'Retry-After': '0.5'}),
+		createResponse(200),
+	]);
+	const fetchWithRetry = withRetry(mockFetch, {
+		backoff() {
+			backoffCalled = true;
+			return 0;
+		},
+	});
+
+	const response = await fetchWithRetry('https://example.com');
+	t.is(response.status, 200);
+	t.true(backoffCalled);
+});
+
+test('Retry-After with scientific notation falls back to backoff', async t => {
+	let backoffCalled = false;
+	const mockFetch = createMockFetch([
+		createResponse(429, {'Retry-After': '1e3'}),
+		createResponse(200),
+	]);
+	const fetchWithRetry = withRetry(mockFetch, {
+		backoff() {
+			backoffCalled = true;
+			return 0;
+		},
+	});
+
+	const response = await fetchWithRetry('https://example.com');
+	t.is(response.status, 200);
+	t.true(backoffCalled);
+});
+
+test('Retry-After with hexadecimal number falls back to backoff', async t => {
+	let backoffCalled = false;
+	const mockFetch = createMockFetch([
+		createResponse(429, {'Retry-After': '0x10'}),
+		createResponse(200),
+	]);
+	const fetchWithRetry = withRetry(mockFetch, {
+		backoff() {
+			backoffCalled = true;
+			return 0;
+		},
+	});
+
+	const response = await fetchWithRetry('https://example.com');
+	t.is(response.status, 200);
+	t.true(backoffCalled);
+});
+
+test('Retry-After with leading plus sign falls back to backoff', async t => {
+	let backoffCalled = false;
+	const mockFetch = createMockFetch([
+		createResponse(429, {'Retry-After': '+5'}),
+		createResponse(200),
+	]);
+	const fetchWithRetry = withRetry(mockFetch, {
+		backoff() {
+			backoffCalled = true;
+			return 0;
+		},
+	});
+
+	const response = await fetchWithRetry('https://example.com');
+	t.is(response.status, 200);
+	t.true(backoffCalled);
+});
+
 test('retries: 0 does not retry network errors', async t => {
 	const mockFetch = createMockFetch([networkError()]);
 	const fetchWithRetry = withRetry(mockFetch, {retries: 0});
