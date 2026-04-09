@@ -14,9 +14,11 @@ export class HttpError extends Error {
 	}
 }
 
-export async function throwIfHttpError(responseOrPromise) {
-	if (!(responseOrPromise instanceof Response)) {
-		responseOrPromise = await responseOrPromise;
+const throwIfHttpErrorAsync = async responsePromise => throwIfHttpError(await responsePromise);
+
+export function throwIfHttpError(responseOrPromise) {
+	if (typeof responseOrPromise?.then === 'function') {
+		return throwIfHttpErrorAsync(responseOrPromise);
 	}
 
 	if (!responseOrPromise.ok) {

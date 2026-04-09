@@ -1,6 +1,7 @@
 import {
 	pipeline,
 	SchemaValidationError,
+	throwIfHttpError,
 	withBaseUrl,
 	withCache,
 	withDeduplication,
@@ -29,6 +30,9 @@ const inferredResult: number = pipeline(
 	value => value.toString(),
 	value => value.length,
 );
+
+const directHttpErrorResponse: Response = throwIfHttpError(new Response());
+const promisedHttpErrorResponse: Promise<Response> = throwIfHttpError(Promise.resolve(new Response()));
 
 const longPipelineResult: string = pipeline(
 	1,
@@ -99,6 +103,8 @@ const readonlySearchParametersResponse: Promise<Response> = fetchWithReadonlySea
 
 void result;
 void inferredResult;
+void directHttpErrorResponse;
+void promisedHttpErrorResponse;
 void longPipelineResult;
 void veryLongPipelineResult;
 void responsePromise;
