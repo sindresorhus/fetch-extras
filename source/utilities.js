@@ -1,8 +1,8 @@
 export const blockedDefaultHeaderNamesSymbol = Symbol('blockedDefaultHeaderNames');
 export const inheritedRequestBodyHeaderNamesSymbol = Symbol('inheritedRequestBodyHeaderNames');
+export const resolvedRequestHeadersOptionSymbol = Symbol('resolvedRequestHeadersOption');
 export const timeoutDurationSymbol = Symbol('timeoutDuration');
 export const resolveRequestUrlSymbol = Symbol('resolveRequestUrl');
-export const resolveAuthorizationHeaderSymbol = Symbol('resolveAuthorizationHeader');
 export const resolveRequestHeadersSymbol = Symbol('resolveRequestHeaders');
 export const resolveRequestBodySymbol = Symbol('resolveRequestBody');
 export const waitForConcurrencySlotSymbol = Symbol('waitForConcurrencySlot');
@@ -331,7 +331,12 @@ export function getRequestReplayHeaders(urlOrRequest, options = {}) {
 }
 
 export function resolveRequestHeaders(fetchFunction, urlOrRequest, options = {}) {
-	return fetchFunction[resolveRequestHeadersSymbol]?.(urlOrRequest, options) ?? getRequestReplayHeaders(urlOrRequest, options);
+	const resolvedOptions = withFetchSignal(fetchFunction, urlOrRequest, options);
+	if (hasResolvedRequestHeaders(urlOrRequest, resolvedOptions)) {
+		return getRequestReplayHeaders(urlOrRequest, resolvedOptions);
+	}
+
+	return fetchFunction[resolveRequestHeadersSymbol]?.(urlOrRequest, resolvedOptions) ?? getRequestReplayHeaders(urlOrRequest, resolvedOptions);
 }
 
 export function resolveRequestBody(fetchFunction, urlOrRequest, options = {}) {
@@ -353,6 +358,35 @@ export function resolveRequestBodyOptions(fetchFunction, urlOrRequest, options =
 
 export function hasHeaders(headers) {
 	return !headers.keys().next().done;
+}
+
+export function hasResolvedRequestHeaders(urlOrRequest, options = {}) {
+	return Boolean(urlOrRequest?.[resolvedRequestHeadersOptionSymbol] || options[resolvedRequestHeadersOptionSymbol]);
+}
+
+export function withResolvedRequestHeaders(options, headers) {
+	return {
+		...options,
+		headers,
+		[resolvedRequestHeadersOptionSymbol]: true,
+	};
+}
+
+/**
+Resolves effective request headers and, when needed, marks them as already resolved for downstream wrappers.
+
+@param {typeof fetch} fetchFunction - The fetch function whose header resolver metadata should be honored.
+@param {RequestInfo | URL} urlOrRequest - The current request input.
+@param {RequestInit} [options] - Request options associated with the input.
+@returns {Promise<Headers>} The resolved headers.
+*/
+export async function getResolvedRequestHeaders(fetchFunction, urlOrRequest, options = {}) {
+	return new Headers(await resolveRequestHeaders(fetchFunction, urlOrRequest, options));
+}
+
+export function markResolvedRequestHeaders(input) {
+	input[resolvedRequestHeadersOptionSymbol] = true;
+	return input;
 }
 
 export function getRequestSignal(urlOrRequest, options = {}) {
@@ -377,6 +411,14 @@ export function getFetchSignal(fetchFunction, providedSignal) {
 	}
 
 	return getTimeoutSignal(timeoutDuration, providedSignal);
+}
+
+export function withFetchSignal(fetchFunction, urlOrRequest, options = {}) {
+	const signal = getFetchSignal(fetchFunction, getRequestSignal(urlOrRequest, options));
+
+	return signal
+		? {...options, signal}
+		: options;
 }
 
 export function notifyFetchStart(fetchFunction, options) {
@@ -413,7 +455,7 @@ export function requestSnapshot(request) {
 export function copyFetchMetadata(targetFetch, sourceFetch) {
 	/*
 	Boundary: this only forwards metadata that outer wrappers need to preserve their documented behavior.
-	Right now that is timeoutDurationSymbol, resolveRequestUrlSymbol, resolveAuthorizationHeaderSymbol, resolveRequestHeadersSymbol, and resolveRequestBodySymbol so wrappers can preserve timeout behavior, URL-based composition semantics, Authorization-scoped refresh deduplication, effective request-header inspection, and replayable transformed request bodies through simple wrapper chains.
+	Right now that is timeoutDurationSymbol, resolveRequestUrlSymbol, resolveRequestHeadersSymbol, and resolveRequestBodySymbol so wrappers can preserve timeout behavior, URL-based composition semantics, effective request-header inspection, and replayable transformed request bodies through simple wrapper chains.
 	Nested withTimeout wrappers are not a supported contract. Keep timeout forwarding simple and let the outermost documented withTimeout define the budget.
 	Do not expand this into a generic wrapper-introspection channel.
 	*/
@@ -423,10 +465,6 @@ export function copyFetchMetadata(targetFetch, sourceFetch) {
 
 	if (targetFetch[resolveRequestUrlSymbol] === undefined && sourceFetch[resolveRequestUrlSymbol] !== undefined) {
 		targetFetch[resolveRequestUrlSymbol] = sourceFetch[resolveRequestUrlSymbol];
-	}
-
-	if (targetFetch[resolveAuthorizationHeaderSymbol] === undefined && sourceFetch[resolveAuthorizationHeaderSymbol] !== undefined) {
-		targetFetch[resolveAuthorizationHeaderSymbol] = sourceFetch[resolveAuthorizationHeaderSymbol];
 	}
 
 	if (targetFetch[resolveRequestHeadersSymbol] === undefined && sourceFetch[resolveRequestHeadersSymbol] !== undefined) {

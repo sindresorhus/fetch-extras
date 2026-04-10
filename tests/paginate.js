@@ -2,8 +2,10 @@ import test from 'ava';
 import {
 	paginate,
 	withHeaders,
+	withHooks,
 	withJsonBody,
 	withRetry,
+	withTimeout,
 } from 'fetch-extras';
 import parseLinkHeader from '../source/parse-link-header.js';
 
@@ -105,6 +107,55 @@ const createRequestRecord = async (request, {includeBody = false, recordHeaders 
 	}
 
 	return requestRecord;
+};
+
+const createStreamedBody = body => new ReadableStream({
+	start(controller) {
+		controller.enqueue(new TextEncoder().encode(body));
+		controller.close();
+	},
+});
+
+const createRecordedStreamingPaginationFetch = () => {
+	const seenRequests = [];
+
+	return {
+		seenRequests,
+		async fetchFunction(input, options) {
+			const request = input instanceof Request ? input : new Request(input, options);
+			const page = seenRequests.length + 1;
+
+			seenRequests.push({
+				url: request.url,
+				body: request.body ? await request.text() : undefined,
+				contentType: request.headers.get('content-type'),
+			});
+
+			return {
+				ok: true,
+				status: 200,
+				url: request.url,
+				headers: {
+					get(name) {
+						if (name === 'Link' && page < 3) {
+							return `<https://api.example.com/?page=${page + 1}>; rel="next"`;
+						}
+
+						return undefined;
+					},
+				},
+				json: async () => [page],
+			};
+		},
+	};
+};
+
+const assertStreamingPaginationRequests = (t, seenRequests, bodies) => {
+	t.deepEqual(seenRequests, bodies.map((body, index) => ({
+		url: `https://api.example.com/?page=${index + 1}`,
+		body,
+		contentType: body === undefined ? null : 'text/plain',
+	})));
 };
 
 const createRedirectedRecordedRequestFetch = ({redirectUrl = 'https://cdn.example.net/?page=1', nextLink, includeBody = false, recordHeaders = []} = {}) => {
@@ -449,6 +500,282 @@ test.serial('paginate - preserves Request configuration across pages', async t =
 	]);
 });
 
+test.serial('paginate - bodyful requests re-resolve async withHeaders defaults on every page', async t => {
+	let defaultHeaderNumber = 0;
+	const seenRequests = [];
+	const fetchFunction = withHeaders(async (input, options) => {
+		const request = input instanceof Request ? input : new Request(input, options);
+		const pageParameter = new URL(request.url).searchParams.get('page');
+		const page = pageParameter ? Number.parseInt(pageParameter, 10) : 1;
+		const body = request.body ? await request.text() : undefined;
+
+		seenRequests.push({
+			url: request.url,
+			xDefault: request.headers.get('x-default'),
+			body,
+		});
+
+		return {
+			ok: true,
+			status: 200,
+			url: request.url,
+			headers: {
+				get(name) {
+					if (name === 'Link' && page < 3) {
+						return `<http://example.com/?page=${page + 1}>; rel="next"`;
+					}
+
+					return undefined;
+				},
+			},
+			json: async () => [page],
+		};
+	}, async () => {
+		defaultHeaderNumber++;
+		return {
+			'x-default': `value-${defaultHeaderNumber}`,
+		};
+	});
+
+	const items = await paginate.all('http://example.com/?page=1', {
+		method: 'POST',
+		body: 'page request body',
+		fetchFunction,
+	});
+
+	t.deepEqual(items, [1, 2, 3]);
+	t.deepEqual(seenRequests.map(request => ({url: request.url, body: request.body})), [
+		{
+			url: 'http://example.com/?page=1',
+			body: 'page request body',
+		},
+		{
+			url: 'http://example.com/?page=2',
+			body: 'page request body',
+		},
+		{
+			url: 'http://example.com/?page=3',
+			body: 'page request body',
+		},
+	]);
+	t.true(seenRequests.every(request => request.xDefault !== null));
+	t.is(new Set(seenRequests.map(request => request.xDefault)).size, 3);
+});
+
+test.serial('paginate - Request input re-resolves async withHeaders defaults on every page', async t => {
+	let defaultHeaderNumber = 0;
+	const seenRequests = [];
+	const fetchFunction = withHeaders(async (input, options) => {
+		const request = input instanceof Request ? input : new Request(input, options);
+		const pageParameter = new URL(request.url).searchParams.get('page');
+		const page = pageParameter ? Number.parseInt(pageParameter, 10) : 1;
+		const body = request.body ? await request.text() : undefined;
+
+		seenRequests.push({
+			url: request.url,
+			xDefault: request.headers.get('x-default'),
+			body,
+		});
+
+		return {
+			ok: true,
+			status: 200,
+			url: request.url,
+			headers: {
+				get(name) {
+					if (name === 'Link' && page < 3) {
+						return `<http://example.com/?page=${page + 1}>; rel="next"`;
+					}
+
+					return undefined;
+				},
+			},
+			json: async () => [page],
+		};
+	}, async () => {
+		defaultHeaderNumber++;
+		return {
+			'x-default': `value-${defaultHeaderNumber}`,
+		};
+	});
+
+	const items = await paginate.all(new Request('http://example.com/?page=1', {
+		method: 'POST',
+		body: 'page request body',
+	}), {fetchFunction});
+
+	t.deepEqual(items, [1, 2, 3]);
+	t.deepEqual(seenRequests.map(request => ({url: request.url, body: request.body})), [
+		{
+			url: 'http://example.com/?page=1',
+			body: 'page request body',
+		},
+		{
+			url: 'http://example.com/?page=2',
+			body: 'page request body',
+		},
+		{
+			url: 'http://example.com/?page=3',
+			body: 'page request body',
+		},
+	]);
+	t.deepEqual(seenRequests.map(request => request.xDefault), [
+		'value-1',
+		'value-2',
+		'value-3',
+	]);
+});
+
+test.serial('paginate - Request input preserves one resolved async withHeaders snapshot per page through outer withHooks', async t => {
+	let tokenNumber = 0;
+	const hookAuthorizations = [];
+	const fetchAuthorizations = [];
+	const fetchFunction = withHooks(
+		withHeaders(async request => {
+			const nextRequest = request instanceof Request ? request : new Request(request);
+			const pageParameter = new URL(nextRequest.url).searchParams.get('page');
+			const page = pageParameter ? Number.parseInt(pageParameter, 10) : 1;
+
+			fetchAuthorizations.push(nextRequest.headers.get('authorization'));
+
+			return {
+				ok: true,
+				status: 200,
+				url: nextRequest.url,
+				headers: {
+					get(name) {
+						if (name === 'Link' && page < 3) {
+							return `<http://example.com/?page=${page + 1}>; rel="next"`;
+						}
+
+						return undefined;
+					},
+				},
+				json: async () => [page],
+			};
+		}, async () => {
+			tokenNumber++;
+			return {
+				authorization: `Bearer ${tokenNumber}`,
+			};
+		}),
+		{
+			beforeRequest({options}) {
+				hookAuthorizations.push(new Headers(options.headers).get('authorization'));
+			},
+		},
+	);
+
+	const items = await paginate.all(new Request('http://example.com/?page=1', {
+		method: 'POST',
+		body: 'page request body',
+	}), {fetchFunction});
+
+	t.deepEqual(items, [1, 2, 3]);
+	t.deepEqual(hookAuthorizations, ['Bearer 1', 'Bearer 2', 'Bearer 3']);
+	t.deepEqual(fetchAuthorizations, ['Bearer 1', 'Bearer 2', 'Bearer 3']);
+});
+
+test.serial('paginate - streamed body requests re-resolve async withHeaders defaults on every page', async t => {
+	let defaultHeaderNumber = 0;
+	const seenRequests = [];
+	const fetchFunction = withHeaders(async (input, options) => {
+		const request = input instanceof Request ? input : new Request(input, options);
+		const pageParameter = new URL(request.url).searchParams.get('page');
+		const page = pageParameter ? Number.parseInt(pageParameter, 10) : 1;
+		const body = request.body ? await request.text() : undefined;
+
+		seenRequests.push({
+			url: request.url,
+			xDefault: request.headers.get('x-default'),
+			body,
+		});
+
+		return {
+			ok: true,
+			status: 200,
+			url: request.url,
+			headers: {
+				get(name) {
+					if (name === 'Link' && page < 3) {
+						return `<http://example.com/?page=${page + 1}>; rel="next"`;
+					}
+
+					return undefined;
+				},
+			},
+			json: async () => [page],
+		};
+	}, async () => {
+		defaultHeaderNumber++;
+		return {
+			'x-default': `value-${defaultHeaderNumber}`,
+		};
+	});
+
+	const items = await paginate.all('http://example.com/?page=1', {
+		method: 'POST',
+		body: createStreamedBody('page request body'),
+		duplex: 'half',
+		fetchFunction,
+	});
+
+	t.deepEqual(items, [1, 2, 3]);
+	t.deepEqual(seenRequests.map(request => ({url: request.url, body: request.body})), [
+		{
+			url: 'http://example.com/?page=1',
+			body: 'page request body',
+		},
+		{
+			url: 'http://example.com/?page=2',
+			body: 'page request body',
+		},
+		{
+			url: 'http://example.com/?page=3',
+			body: 'page request body',
+		},
+	]);
+	t.deepEqual(seenRequests.map(request => request.xDefault), [
+		'value-1',
+		'value-2',
+		'value-3',
+	]);
+});
+
+test.serial('paginate - withTimeout applies while re-resolving async headers for later pages', async t => {
+	let callCount = 0;
+	const fetchFunction = withTimeout(withHeaders(async request => {
+		callCount++;
+
+		return {
+			ok: true,
+			status: 200,
+			url: request.url,
+			headers: {
+				get(name) {
+					if (name === 'Link' && callCount === 1) {
+						return '<https://example.com/api?page=2>; rel="next"';
+					}
+
+					return undefined;
+				},
+			},
+			json: async () => [callCount],
+		};
+	}, async () => callCount === 0
+		? {'x-default': 'page-1'}
+		: new Promise(resolve => {
+			setTimeout(resolve, 100, {'x-default': 'page-2'});
+		})), 10);
+
+	const error = await t.throwsAsync(() => paginate.all('https://example.com/api?page=1', {
+		fetchFunction,
+	}));
+
+	t.is(error.name, 'TimeoutError');
+	t.is(callCount, 1);
+});
+
 test.serial('paginate - URL input preserves init.body for withJsonBody on the first request', async t => {
 	const seenRequests = [];
 	const mockFetch = async (input, options) => {
@@ -483,6 +810,112 @@ test.serial('paginate - URL input preserves init.body for withJsonBody on the fi
 		body: '{"foo":1}',
 		contentType: 'application/json',
 	}]);
+});
+
+test.serial('paginate - URL input preserves withJsonBody headers on later requests', async t => {
+	const seenRequests = [];
+
+	const items = await paginate.all('https://example.com/api?page=1', {
+		method: 'POST',
+		body: {page: 1},
+		fetchFunction: withJsonBody(async (input, options) => {
+			const request = input instanceof Request ? input : new Request(input, options);
+			const page = seenRequests.length + 1;
+
+			seenRequests.push({
+				url: request.url,
+				body: await request.text(),
+				contentType: request.headers.get('content-type'),
+			});
+
+			return {
+				ok: true,
+				status: 200,
+				url: request.url,
+				headers: {
+					get(name) {
+						if (name === 'Link' && page === 1) {
+							return '<https://example.com/api?page=2>; rel="next"';
+						}
+
+						return undefined;
+					},
+				},
+				json: async () => [page],
+			};
+		}),
+	});
+
+	t.deepEqual(items, [1, 2]);
+	t.deepEqual(seenRequests, [
+		{
+			url: 'https://example.com/api?page=1',
+			body: '{"page":1}',
+			contentType: 'application/json',
+		},
+		{
+			url: 'https://example.com/api?page=2',
+			body: '{"page":1}',
+			contentType: 'application/json',
+		},
+	]);
+});
+
+test.serial('paginate - Request input preserves withJsonBody body transforms when using a template', async t => {
+	const seenRequests = [];
+	const input = new Request('https://example.com/api?page=1', {
+		method: 'POST',
+		headers: {
+			'x-request': 'present',
+		},
+	});
+
+	const items = await paginate.all(input, {
+		body: {page: 1},
+		fetchFunction: withJsonBody(async (request, options) => {
+			const nextRequest = request instanceof Request ? request : new Request(request, options);
+			const page = seenRequests.length + 1;
+
+			seenRequests.push({
+				url: nextRequest.url,
+				body: await nextRequest.text(),
+				contentType: nextRequest.headers.get('content-type'),
+				requestHeader: nextRequest.headers.get('x-request'),
+			});
+
+			return {
+				ok: true,
+				status: 200,
+				url: nextRequest.url,
+				headers: {
+					get(name) {
+						if (name === 'Link' && page === 1) {
+							return '<https://example.com/api?page=2>; rel="next"';
+						}
+
+						return undefined;
+					},
+				},
+				json: async () => [page],
+			};
+		}),
+	});
+
+	t.deepEqual(items, [1, 2]);
+	t.deepEqual(seenRequests, [
+		{
+			url: 'https://example.com/api?page=1',
+			body: '{"page":1}',
+			contentType: 'application/json',
+			requestHeader: 'present',
+		},
+		{
+			url: 'https://example.com/api?page=2',
+			body: '{"page":1}',
+			contentType: 'application/json',
+			requestHeader: 'present',
+		},
+	]);
 });
 
 test.serial('paginate - URL input preserves replayable init.body for withRetry on the first request', async t => {
@@ -761,7 +1194,7 @@ test.serial('paginate - preserves explicit next-page headers while dropping inhe
 	]);
 });
 
-test.serial('paginate - does not reapply withHeaders Authorization defaults after cross-origin pagination strips them', async t => {
+test.serial('paginate - reapplies withHeaders Authorization defaults on cross-origin next pages', async t => {
 	const {seenRequests, fetchFunction} = createRecordedRequestFetch({
 		nextLink: `<${crossOriginNextUrl}>; rel="next"`,
 	});
@@ -781,12 +1214,37 @@ test.serial('paginate - does not reapply withHeaders Authorization defaults afte
 		},
 		{
 			url: 'https://evil.example/?page=2',
-			authorization: null,
+			authorization: 'Bearer secret',
 		},
 	]);
 });
 
-test.serial('paginate - drops inherited withHeaders defaults after a cross-origin redirect', async t => {
+test.serial('paginate - reapplies async withHeaders Authorization defaults on cross-origin next pages', async t => {
+	const {seenRequests, fetchFunction} = createRecordedRequestFetch({
+		nextLink: `<${crossOriginNextUrl}>; rel="next"`,
+	});
+	const fetchWithHeaders = withHeaders(fetchFunction, async () => ({
+		authorization: 'Bearer secret',
+	}));
+
+	const items = await paginate.all('https://api.example.com/?page=1', {
+		fetchFunction: fetchWithHeaders,
+	});
+
+	t.deepEqual(items, [1, 2]);
+	t.deepEqual(seenRequests, [
+		{
+			url: 'https://api.example.com/?page=1',
+			authorization: 'Bearer secret',
+		},
+		{
+			url: 'https://evil.example/?page=2',
+			authorization: 'Bearer secret',
+		},
+	]);
+});
+
+test.serial('paginate - reapplies withHeaders defaults after a cross-origin redirect', async t => {
 	const seenRequests = [];
 	const fetchWithHeaders = withHeaders(async (input, options) => {
 		const request = input instanceof Request ? input : new Request(input, options);
@@ -834,11 +1292,52 @@ test.serial('paginate - drops inherited withHeaders defaults after a cross-origi
 		},
 		{
 			url: 'https://cdn.example.net/?page=2',
-			authorization: null,
-			accept: null,
-			xApiVersion: null,
+			authorization: 'Bearer secret',
+			accept: 'application/json',
+			xApiVersion: '2026-03',
 		},
 	]);
+});
+
+test.serial('paginate - async withHeaders defaults re-resolve per page across cross-origin redirect', async t => {
+	let defaultHeaderNumber = 0;
+	const seenRequests = [];
+	const fetchWithHeaders = withHeaders(async (input, options) => {
+		const request = input instanceof Request ? input : new Request(input, options);
+		const page = seenRequests.length + 1;
+
+		seenRequests.push({
+			url: request.url,
+			xDefault: request.headers.get('x-default'),
+		});
+
+		return {
+			ok: true,
+			status: 200,
+			url: page === 1 ? 'https://cdn.example.net/?page=1' : request.url,
+			headers: {
+				get(name) {
+					if (name === 'Link' && page === 1) {
+						return '<https://cdn.example.net/?page=2>; rel="next"';
+					}
+
+					return undefined;
+				},
+			},
+			json: async () => [page],
+		};
+	}, async () => {
+		defaultHeaderNumber++;
+		return {'x-default': `value-${defaultHeaderNumber}`};
+	});
+
+	const items = await paginate.all('https://api.example.com/?page=1', {
+		fetchFunction: fetchWithHeaders,
+	});
+
+	t.deepEqual(items, [1, 2]);
+	t.is(seenRequests[0].xDefault, 'value-1');
+	t.is(seenRequests[1].xDefault, 'value-2');
 });
 
 test.serial('paginate - stops before fetching an extra page when countLimit is reached', async t => {
@@ -3322,6 +3821,43 @@ test.serial('paginate - replays streamed bodies for absolute URL input across pa
 			contentType: 'text/plain',
 		},
 	]);
+});
+
+test.serial('paginate - later pages can add a streamed body without reusing it on page 3', async t => {
+	const {seenRequests, fetchFunction} = createRecordedStreamingPaginationFetch();
+
+	const items = await paginate.all('https://api.example.com/?page=1', {
+		fetchFunction,
+		pagination: {
+			paginate({currentItems, response}) {
+				const nextLink = response.headers.get('Link');
+
+				if (!nextLink) {
+					return false;
+				}
+
+				const nextUrl = new URL(nextLink.match(/<([^>]+)>/u)[1]);
+				const page = currentItems[0];
+
+				if (page === 1) {
+					return {
+						url: nextUrl,
+						method: 'POST',
+						body: createStreamedBody('later page body'),
+						duplex: 'half',
+						headers: {
+							'content-type': 'text/plain',
+						},
+					};
+				}
+
+				return {url: nextUrl};
+			},
+		},
+	});
+
+	t.deepEqual(items, [1, 2, 3]);
+	assertStreamingPaginationRequests(t, seenRequests, [undefined, 'later page body', undefined]);
 });
 
 test.serial('paginate - allows later pages to add a body while the current url is still relative', async t => {

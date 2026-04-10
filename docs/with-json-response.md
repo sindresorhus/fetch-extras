@@ -50,7 +50,7 @@ const user = await fetchUser('/api/user/1');
 console.log(user.name);
 ```
 
-Can be combined with other `with*` functions (place last in the pipeline):
+Can be combined with other `with*` functions (place last in documented `pipeline()` order):
 
 ```js
 import {pipeline, withHttpError, withTimeout, withJsonResponse} from 'fetch-extras';

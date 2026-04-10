@@ -42,7 +42,7 @@ const response = await apiFetch('/api/users');
 const data = await response.json();
 ```
 
-Can be combined with other `with*` functions. Should be composed inside `withHttpError` so it can see the raw 401 response:
+Can be combined with other `with*` functions. In documented `pipeline()` order, place `withTokenRefresh` before `withHttpError` so it can see the raw 401 response:
 
 ```js
 import {pipeline, withHttpError, withTokenRefresh, withBaseUrl} from 'fetch-extras';

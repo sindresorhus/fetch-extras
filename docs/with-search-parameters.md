@@ -32,7 +32,7 @@ A wrapped fetch function that merges the default search parameters into every re
 > String URLs and `URL` objects are modified. `Request` objects are passed through unchanged.
 
 > [!TIP]
-> Place `withSearchParameters` after `withBaseUrl` in a pipeline so the parameters are appended to the resolved absolute URL.
+> In documented `pipeline()` order, place `withSearchParameters` after `withBaseUrl` so the parameters are appended to the resolved absolute URL.
 
 ## Example
 

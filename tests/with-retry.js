@@ -66,6 +66,32 @@ const createRecordedResponseFetch = ({initialStatus = 503, retryStatus = 200, on
 	};
 };
 
+const createAbortError = () => {
+	const error = new Error('The operation was aborted');
+	error.name = 'AbortError';
+	return error;
+};
+
+const delayWithSignal = (delay, signal, value) => new Promise((resolve, reject) => {
+	const timer = setTimeout(resolve, delay, value);
+
+	signal?.addEventListener('abort', () => {
+		clearTimeout(timer);
+		reject(signal.reason);
+	}, {once: true});
+});
+
+const createTimedResponseFetch = delay => async (_url, options = {}) => new Promise((resolve, reject) => {
+	const timer = setTimeout(() => {
+		resolve(new Response('ok', {status: 200}));
+	}, delay);
+
+	options.signal?.addEventListener('abort', () => {
+		clearTimeout(timer);
+		reject(createAbortError());
+	}, {once: true});
+});
+
 test('succeeds on first attempt without retry', async t => {
 	const mockFetch = createMockFetch([createResponse(200)]);
 	const fetchWithRetry = withRetry(mockFetch);
@@ -185,6 +211,49 @@ test('withHooks after withRetry reuses the same hooked request across retries', 
 	t.is(beforeRequestCallCount, 1);
 	t.is(mockFetch.calls[0].options.headers['x-request-id'], 'static-request-id');
 	t.is(mockFetch.calls[1].options.headers['x-request-id'], 'static-request-id');
+});
+
+test('withTimeout applies while retry pre-resolves custom request headers', async t => {
+	let callCount = 0;
+	const mockFetch = async () => {
+		callCount++;
+		return new Response(null, {status: 200});
+	};
+
+	mockFetch[resolveRequestHeadersSymbol] = async function (_url, options = {}) {
+		return delayWithSignal(100, options.signal, new Headers({'x-test': '1'}));
+	};
+
+	const fetchWithRetry = withRetry(withTimeout(mockFetch, 10), {retries: 0});
+
+	const error = await t.throwsAsync(() => fetchWithRetry('https://example.com'));
+
+	t.is(error.name, 'TimeoutError');
+	t.is(callCount, 0);
+});
+
+test('withTimeout can abort the fetch after retry header resolution consumes part of the budget', async t => {
+	let callCount = 0;
+	const timedFetch = createTimedResponseFetch(15);
+	const mockFetch = async (url, options = {}) => {
+		callCount++;
+		return timedFetch(url, options);
+	};
+
+	mockFetch[resolveRequestHeadersSymbol] = async function (_url, options = {}) {
+		await delayWithSignal(15, options.signal);
+
+		return new Headers({'x-test': 'value'});
+	};
+
+	const fetchWithRetry = withRetry(withTimeout(mockFetch, 20), {retries: 0});
+
+	await t.throwsAsync(
+		() => fetchWithRetry('https://example.com'),
+		{name: 'AbortError'},
+	);
+
+	t.is(callCount, 1);
 });
 
 test('retries POST when added to methods', async t => {
@@ -664,6 +733,129 @@ test('Request body overrides preserve explicit Request body headers across retry
 	t.is(response.status, 200);
 	t.deepEqual(contentTypes, ['text/plain;charset=UTF-8', 'text/plain;charset=UTF-8']);
 	t.deepEqual(contentLengths, ['999', '999']);
+});
+
+test('Request body overrides retry through async withHeaders defaults', async t => {
+	const defaultHeaders = [];
+	const mockFetch = createRecordedResponseFetch({
+		initialStatus: 500,
+		onRequest(request) {
+			defaultHeaders.push(request.headers.get('x-default'));
+		},
+	});
+
+	const fetchWithRetry = withRetry(withHeaders(mockFetch, async () => ({
+		'x-default': 'value',
+	})), {backoff: () => 0});
+	const request = createBodyOverrideRequest({
+		'content-type': 'text/plain;charset=UTF-8',
+		'content-length': '999',
+	});
+
+	const response = await fetchWithRetry(request, {body: createFormDataBody()});
+
+	t.is(response.status, 200);
+	t.deepEqual(defaultHeaders, ['value', 'value']);
+});
+
+test('Request body overrides reuse the same resolved async withHeaders defaults across retry attempts', async t => {
+	let defaultHeaderNumber = 0;
+	const defaultHeaders = [];
+	const mockFetch = createRecordedResponseFetch({
+		initialStatus: 500,
+		onRequest(request) {
+			defaultHeaders.push(request.headers.get('x-default'));
+		},
+	});
+
+	const fetchWithRetry = withRetry(withHeaders(mockFetch, async () => {
+		defaultHeaderNumber++;
+		return {
+			'x-default': `value-${defaultHeaderNumber}`,
+		};
+	}), {backoff: () => 0});
+	const request = createBodyOverrideRequest({
+		'content-type': 'text/plain;charset=UTF-8',
+		'content-length': '999',
+	});
+
+	const response = await fetchWithRetry(request, {body: createFormDataBody()});
+
+	t.is(response.status, 200);
+	t.deepEqual(defaultHeaders, ['value-1', 'value-1']);
+});
+
+test('bodyless requests reuse the same resolved async withHeaders defaults across retry attempts', async t => {
+	let defaultHeaderNumber = 0;
+	const defaultHeaders = [];
+	const mockFetch = createRecordedResponseFetch({
+		initialStatus: 500,
+		onRequest(request) {
+			defaultHeaders.push(request.headers.get('x-default'));
+		},
+	});
+
+	const fetchWithRetry = withRetry(withHeaders(mockFetch, async () => {
+		defaultHeaderNumber++;
+		return {
+			'x-default': `value-${defaultHeaderNumber}`,
+		};
+	}), {backoff: () => 0});
+
+	const response = await fetchWithRetry('https://example.com/api');
+
+	t.is(response.status, 200);
+	t.deepEqual(defaultHeaders, ['value-1', 'value-1']);
+});
+
+test('bodyless requests do not rerun nested async withHeaders resolvers across retry attempts', async t => {
+	let outerCallCount = 0;
+	let innerCallCount = 0;
+	let fetchCallCount = 0;
+	const mockFetch = async (urlOrRequest, options = {}) => {
+		fetchCallCount++;
+		const request = new Request(urlOrRequest, options);
+
+		return new Response(null, {
+			status: fetchCallCount === 1 ? 500 : 200,
+			headers: request.headers,
+		});
+	};
+
+	const fetchWithRetry = withRetry(withHeaders(withHeaders(mockFetch, async () => {
+		innerCallCount++;
+		return {'x-inner': String(innerCallCount)};
+	}), async () => {
+		outerCallCount++;
+		return {'x-outer': String(outerCallCount)};
+	}), {backoff: () => 0});
+
+	const response = await fetchWithRetry('https://example.com/api');
+
+	t.is(response.status, 200);
+	t.is(outerCallCount, 1);
+	t.is(innerCallCount, 1);
+});
+
+test('bodyless requests reuse empty resolved async withHeaders defaults across retry attempts', async t => {
+	const defaultHeaders = [
+		{},
+		{'x-default': 'value'},
+	];
+	const seenHeaders = [];
+	const mockFetch = createRecordedResponseFetch({
+		initialStatus: 500,
+		onRequest(request) {
+			seenHeaders.push(request.headers.get('x-default'));
+		},
+	});
+
+	const fetchWithRetry = withRetry(withHeaders(mockFetch, async () => defaultHeaders.shift() ?? {}), {backoff: () => 0});
+
+	const response = await fetchWithRetry('https://example.com/api');
+
+	t.is(response.status, 200);
+	t.deepEqual(seenHeaders, [null, null]);
 });
 
 test('Request body overrides preserve explicit Request body headers across retry through outer withHeaders', async t => {
@@ -1210,6 +1402,53 @@ test('synthesized resolved bodies preserve resolved headers across retries', asy
 	t.deepEqual(bodies, ['{"name":"Alice"}', '{"name":"Alice"}']);
 });
 
+test('async withHeaders resolution is aborted while retry pre-resolves headers', async t => {
+	const abortController = new AbortController();
+	let resolveDefaultHeaders;
+	let notifyStarted;
+	const started = new Promise(resolve => {
+		notifyStarted = resolve;
+	});
+	const mockFetch = async () => new Response(null, {status: 200});
+	const fetchWithRetry = withRetry(withHeaders(mockFetch, async () => {
+		notifyStarted();
+		return new Promise(resolve => {
+			resolveDefaultHeaders = resolve;
+		});
+	}), {
+		backoff: () => 0,
+	});
+
+	const pendingRequest = fetchWithRetry('https://example.com', {signal: abortController.signal});
+	await started;
+	abortController.abort();
+
+	await t.throwsAsync(pendingRequest, {name: 'AbortError'});
+	resolveDefaultHeaders({'x-test': '1'});
+});
+
+test('function-based withHeaders defaults freeze correctly when inner fetch has no resolveRequestHeadersSymbol', async t => {
+	let resolverCallCount = 0;
+	const seenHeaders = [];
+	let fetchCallCount = 0;
+	const bareFetch = async (_url, options = {}) => {
+		fetchCallCount++;
+		seenHeaders.push(new Headers(options.headers).get('x-dynamic'));
+		return new Response(null, {status: fetchCallCount === 1 ? 500 : 200});
+	};
+
+	const fetchWithRetry = withRetry(withHeaders(bareFetch, async () => {
+		resolverCallCount++;
+		return {'x-dynamic': `value-${resolverCallCount}`};
+	}), {backoff: () => 0});
+
+	const response = await fetchWithRetry('https://example.com/api');
+
+	t.is(response.status, 200);
+	t.is(resolverCallCount, 1);
+	t.deepEqual(seenHeaders, ['value-1', 'value-1']);
+});
+
 test('one-shot resolved request bodies are not retried', async t => {
 	let callCount = 0;
 	const body = {
@@ -1408,6 +1647,27 @@ test('does not retry timeout errors from withTimeout wrappers', async t => {
 
 	t.true(['AbortError', 'TimeoutError'].includes(error.name));
 	t.is(callCount, 1);
+});
+
+test('withTimeout applies while retry pre-resolves async headers', async t => {
+	let callCount = 0;
+	const mockFetch = async () => {
+		callCount++;
+		return new Response(null, {status: 200});
+	};
+
+	const fetchWithRetry = withRetry(withTimeout(withHeaders(mockFetch, async () => new Promise(resolve => {
+		setTimeout(resolve, 100, {'x-test': '1'});
+	})), 10), {
+		retries: 1,
+		backoff: () => 0,
+	});
+
+	const error = await t.throwsAsync(() => fetchWithRetry('https://example.com'));
+
+	t.is(error.name, 'TimeoutError');
+
+	t.is(callCount, 0);
 });
 
 test('withTimeout aborts retry backoff before the next attempt starts', async t => {

@@ -5,7 +5,7 @@ export type PaginationOptions<ItemType = unknown> = {
 	/**
 	Transform the response into an array of items.
 
-	By default, it calls `response.json()` and expects an array.
+	Default: `response => response.json()`
 
 	@param response - The Response object from the fetch request.
 	@returns An array of items to yield, or a Promise that resolves to an array.
@@ -35,7 +35,7 @@ export type PaginationOptions<ItemType = unknown> = {
 
 	**Important**: The response body has already been consumed by the `transform` function. Do NOT call `response.json()` or other body methods here. Instead, extract pagination info from headers, the URL, or share data from the transform function through closure.
 
-	**Note**: Returning `headers` replaces all inherited headers, consistent with standard Fetch API behavior. When the next page crosses to a different origin, inherited request headers are already cleared before your returned headers are applied. Setting `body` to `undefined` will strip body-related headers (`Content-Type`, `Content-Length`, etc.) from the request.
+	**Note**: Returning `headers` replaces all inherited headers, consistent with standard Fetch API behavior. When the next page crosses to a different origin, inherited request headers are already cleared before your returned headers are applied. Then wrappers such as `withHeaders()` run again for that next page. Setting `body` to `undefined` will strip body-related headers (`Content-Type`, `Content-Length`, etc.) from the request. Function-based `withHeaders()` defaults are still resolved per page after that merge.
 
 	@param data - Context object with response, current URL, and items.
 	@returns Options for the next fetch request, or `false` to stop pagination.
@@ -48,12 +48,10 @@ export type PaginationOptions<ItemType = unknown> = {
 	for await (const item of paginate('https://api.example.com/items', {
 		pagination: {
 			paginate: ({response}) => {
-				const nextCursor = response.headers.get('X-Next-Cursor');
-				if (!nextCursor) return false;
-
-				return {
-					url: new URL(`https://api.example.com/items?cursor=${nextCursor}`)
-				};
+				const cursor = response.headers.get('X-Next-Cursor');
+				return cursor
+					? {url: new URL(`https://api.example.com/items?cursor=${cursor}`)}
+					: false;
 			}
 		}
 	})) {
@@ -67,19 +65,18 @@ export type PaginationOptions<ItemType = unknown> = {
 
 	// Sharing data between transform and paginate via closure
 	let nextCursor;
+
 	for await (const item of paginate('https://api.example.com/items', {
 		pagination: {
 			transform: async (response) => {
 				const data = await response.json();
-				// Store pagination info in closure
 				nextCursor = data.nextCursor;
 				return data.items;
 			},
 			paginate: () => {
-				if (!nextCursor) return false;
-				return {
-					url: new URL(`https://api.example.com/items?cursor=${nextCursor}`)
-				};
+				return nextCursor
+					? {url: new URL(`https://api.example.com/items?cursor=${nextCursor}`)}
+					: false;
 			}
 		}
 	})) {
@@ -241,7 +238,9 @@ By default, it automatically follows RFC 5988 `Link` headers with `rel="next"`.
 
 **Note**: This function does not check response status codes. If you need error handling for non-2xx responses, wrap fetch with `withHttpError()` or handle errors in your `transform` function.
 
-**Important**: When pagination crosses to a different origin, inherited request headers are cleared before the next request is built. If you intentionally need headers on the new origin, return them explicitly from `pagination.paginate`.
+**Important**: When pagination crosses to a different origin, inherited request headers are cleared before the next request is built. Then wrappers like `withHeaders()` run again for that next page. If you intentionally need extra per-page headers on the new origin, return them explicitly from `pagination.paginate`.
+
+**Note**: Later pages are new requests. If your `fetchFunction` uses `withHeaders()`, its defaults still apply on each page. Function-based defaults are re-resolved for each page instead of being frozen from the first page.
 
 @param input - The URL to fetch. Can be a string or URL instance.
 @param options - Fetch options plus pagination options.
@@ -325,6 +324,7 @@ export namespace paginate {
 			countLimit: 50
 		}
 	});
+
 	console.log(`Fetched ${commits.length} commits`);
 	```
 	*/

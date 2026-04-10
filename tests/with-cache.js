@@ -11,7 +11,7 @@ import {
 	withRateLimit,
 	withTimeout,
 } from '../source/index.js';
-import {blockedDefaultHeaderNamesSymbol, timeoutDurationSymbol} from '../source/utilities.js';
+import {blockedDefaultHeaderNamesSymbol, resolveRequestHeadersSymbol, timeoutDurationSymbol} from '../source/utilities.js';
 
 const createMockFetch = (status = 200) => {
 	let callCount = 0;
@@ -35,6 +35,18 @@ const createOptionSensitiveFetch = optionName => {
 		callCount: ++callCount,
 		[optionName]: options[optionName] ?? '__undefined__',
 	});
+};
+
+const createAuthorizationEchoFetch = () => {
+	let callCount = 0;
+
+	return async (_url, options = {}) => {
+		callCount++;
+		return Response.json({
+			callCount,
+			authorization: new Headers(options.headers).get('authorization'),
+		});
+	};
 };
 
 test('returns cached response for repeated GET requests', async t => {
@@ -91,15 +103,7 @@ test('different URLs are cached independently', async t => {
 });
 
 test('GET requests with Authorization headers are not cached', async t => {
-	let callCount = 0;
-
-	const mockFetch = async (_url, options = {}) => {
-		callCount++;
-		return Response.json({
-			callCount,
-			authorization: new Headers(options.headers).get('authorization'),
-		});
-	};
+	const mockFetch = createAuthorizationEchoFetch();
 
 	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
 
@@ -125,15 +129,7 @@ test('GET requests with Authorization headers are not cached', async t => {
 });
 
 test('GET requests with inherited Authorization headers are not cached', async t => {
-	let callCount = 0;
-
-	const mockFetch = async (_url, options = {}) => {
-		callCount++;
-		return Response.json({
-			callCount,
-			authorization: new Headers(options.headers).get('authorization'),
-		});
-	};
+	const mockFetch = createAuthorizationEchoFetch();
 
 	const cachedFetch = pipeline(
 		mockFetch,
@@ -154,6 +150,220 @@ test('GET requests with inherited Authorization headers are not cached', async t
 		callCount: 2,
 		authorization: 'Bearer token',
 	});
+});
+
+test('GET requests with inherited async Authorization headers are not cached', async t => {
+	let tokenNumber = 0;
+	const mockFetch = createAuthorizationEchoFetch();
+
+	const cachedFetch = pipeline(
+		mockFetch,
+		fetchFunction => withHeaders(fetchFunction, async () => {
+			tokenNumber++;
+			return {
+				authorization: `Bearer token-${tokenNumber}`,
+			};
+		}),
+		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+	);
+
+	const firstResponse = await cachedFetch('https://example.com/api');
+	const secondResponse = await cachedFetch('https://example.com/api');
+	const firstData = await firstResponse.json();
+	const secondData = await secondResponse.json();
+
+	t.is(firstData.callCount, 1);
+	t.is(secondData.callCount, 2);
+	t.not(firstData.authorization, secondData.authorization);
+});
+
+test('GET requests preserve empty resolved async headers when checking cacheability', async t => {
+	const mockFetch = createAuthorizationEchoFetch();
+	const resolvedHeaders = [
+		{},
+		{authorization: 'Bearer secret'},
+		{},
+	];
+
+	const cachedFetch = pipeline(
+		mockFetch,
+		fetchFunction => withHeaders(fetchFunction, async () => resolvedHeaders.shift() ?? {}),
+		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+	);
+
+	const firstResponse = await cachedFetch('https://example.com/api');
+	const secondResponse = await cachedFetch('https://example.com/api');
+
+	t.deepEqual(await firstResponse.json(), {
+		callCount: 1,
+		authorization: null,
+	});
+	t.deepEqual(await secondResponse.json(), {
+		callCount: 2,
+		authorization: 'Bearer secret',
+	});
+});
+
+test('GET requests with sync resolveRequestHeadersSymbol stay cacheable when it resolves to empty headers', async t => {
+	let resolverCallCount = 0;
+	let fetchCallCount = 0;
+
+	const mockFetch = async (_url, options = {}) => {
+		fetchCallCount++;
+		return Response.json({
+			fetchCallCount,
+			headerCount: [...new Headers(options.headers)].length,
+		});
+	};
+
+	mockFetch[resolveRequestHeadersSymbol] = function () {
+		resolverCallCount++;
+		return new Headers();
+	};
+
+	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+
+	const firstResponse = await cachedFetch('https://example.com/api');
+	const secondResponse = await cachedFetch('https://example.com/api');
+
+	t.deepEqual(await firstResponse.json(), {
+		fetchCallCount: 1,
+		headerCount: 0,
+	});
+	t.deepEqual(await secondResponse.json(), {
+		fetchCallCount: 1,
+		headerCount: 0,
+	});
+	t.is(fetchCallCount, 1);
+	t.is(resolverCallCount, 2);
+});
+
+test('withTimeout applies while cache pre-resolves async request headers', async t => {
+	let fetchCallCount = 0;
+	const mockFetch = async (_url, options = {}) => {
+		fetchCallCount++;
+
+		return new Promise((resolve, reject) => {
+			const timer = setTimeout(() => {
+				resolve(new Response(null, {status: 200}));
+			}, 15);
+
+			options.signal?.addEventListener('abort', () => {
+				clearTimeout(timer);
+				reject(options.signal.reason);
+			}, {once: true});
+		});
+	};
+
+	mockFetch[resolveRequestHeadersSymbol] = async function (_url, options = {}) {
+		await new Promise((resolve, reject) => {
+			const timer = setTimeout(resolve, 15);
+
+			options.signal?.addEventListener('abort', () => {
+				clearTimeout(timer);
+				reject(options.signal.reason);
+			}, {once: true});
+		});
+
+		return new Headers({'x-test': '1'});
+	};
+
+	const cachedFetch = withCache(withTimeout(mockFetch, 20), {ttl: 60_000});
+
+	const error = await t.throwsAsync(() => cachedFetch('https://example.com/api'));
+
+	t.is(error.name, 'TimeoutError');
+	t.is(fetchCallCount, 1);
+});
+
+test('GET requests with async withHeaders resolve the header function exactly once per request', async t => {
+	let resolverCallCount = 0;
+	let fetchCallCount = 0;
+
+	const mockFetch = async (_url, options = {}) => {
+		fetchCallCount++;
+		return Response.json({
+			fetchCallCount,
+			xDynamic: new Headers(options.headers).get('x-dynamic'),
+		});
+	};
+
+	const cachedFetch = pipeline(
+		mockFetch,
+		fetchFunction => withHeaders(fetchFunction, async () => {
+			resolverCallCount++;
+			return {'x-dynamic': `call-${resolverCallCount}`};
+		}),
+		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+	);
+
+	const response = await cachedFetch('https://example.com/api');
+	const data = await response.json();
+
+	t.is(resolverCallCount, 1);
+	t.is(data.xDynamic, 'call-1');
+});
+
+test('POST requests with async withHeaders resolve the header function exactly once', async t => {
+	let resolverCallCount = 0;
+	let fetchCallCount = 0;
+
+	const mockFetch = async (_url, options = {}) => {
+		fetchCallCount++;
+		return Response.json({
+			fetchCallCount,
+			xDynamic: new Headers(options.headers).get('x-dynamic'),
+		});
+	};
+
+	const cachedFetch = pipeline(
+		mockFetch,
+		fetchFunction => withHeaders(fetchFunction, async () => {
+			resolverCallCount++;
+			return {'x-dynamic': `call-${resolverCallCount}`};
+		}),
+		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+	);
+
+	const response = await cachedFetch('https://example.com/api', {method: 'POST'});
+	const data = await response.json();
+
+	t.is(resolverCallCount, 1);
+	t.is(data.xDynamic, 'call-1');
+});
+
+test('GET requests with sync resolveRequestHeadersSymbol stay non-cacheable when it adds headers', async t => {
+	let resolverCallCount = 0;
+	let fetchCallCount = 0;
+
+	const mockFetch = async (_url, options = {}) => {
+		fetchCallCount++;
+		return Response.json({
+			fetchCallCount,
+			xDynamic: new Headers(options.headers).get('x-dynamic'),
+		});
+	};
+
+	mockFetch[resolveRequestHeadersSymbol] = function () {
+		resolverCallCount++;
+		return new Headers({'x-dynamic': `call-${resolverCallCount}`});
+	};
+
+	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+
+	const firstResponse = await cachedFetch('https://example.com/api');
+	const secondResponse = await cachedFetch('https://example.com/api');
+
+	t.deepEqual(await firstResponse.json(), {
+		fetchCallCount: 1,
+		xDynamic: 'call-1',
+	});
+	t.deepEqual(await secondResponse.json(), {
+		fetchCallCount: 2,
+		xDynamic: 'call-2',
+	});
+	t.is(fetchCallCount, 2);
+	t.is(resolverCallCount, 2);
 });
 
 test('GET requests with inherited non-auth headers are not cached', async t => {
@@ -585,6 +795,104 @@ test('in-flight mutating requests immediately invalidate cached GET responses', 
 	t.is(await overlappingGetResponse.text(), 'get-2');
 
 	resolveMutation();
+	const mutationResponse = await pendingMutation;
+	t.is(await mutationResponse.text(), 'mutated');
+	t.is(getCallCount, 2);
+});
+
+test('mutating requests invalidate cached GET responses before async request-header resolution', async t => {
+	let resolveHeaders;
+	const headerResolutionPromise = new Promise(resolve => {
+		resolveHeaders = resolve;
+	});
+	let headerResolutionCount = 0;
+	let getCallCount = 0;
+
+	const mockFetch = async (urlOrRequest, options = {}) => {
+		const method = (options.method ?? (urlOrRequest instanceof Request ? urlOrRequest.method : 'GET')).toUpperCase();
+
+		if (method === 'GET') {
+			getCallCount++;
+			return new Response(`get-${getCallCount}`);
+		}
+
+		return new Response('mutated');
+	};
+
+	const cachedFetch = pipeline(
+		mockFetch,
+		fetchFunction => withHeaders(fetchFunction, async () => {
+			headerResolutionCount++;
+
+			if (headerResolutionCount === 2) {
+				await headerResolutionPromise;
+			}
+
+			return {};
+		}),
+		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+	);
+
+	const initialResponse = await cachedFetch('https://example.com/api');
+	t.is(await initialResponse.text(), 'get-1');
+
+	const pendingMutation = cachedFetch('https://example.com/api', {method: 'POST'});
+	await Promise.resolve();
+
+	const overlappingGetResponse = await cachedFetch('https://example.com/api');
+	t.is(await overlappingGetResponse.text(), 'get-2');
+
+	resolveHeaders();
+
+	const mutationResponse = await pendingMutation;
+	t.is(await mutationResponse.text(), 'mutated');
+	t.is(getCallCount, 2);
+});
+
+test('mutating Request inputs invalidate cached GET responses before async request-header resolution', async t => {
+	let resolveHeaders;
+	const headerResolutionPromise = new Promise(resolve => {
+		resolveHeaders = resolve;
+	});
+	let headerResolutionCount = 0;
+	let getCallCount = 0;
+
+	const mockFetch = async (urlOrRequest, options = {}) => {
+		const method = (options.method ?? (urlOrRequest instanceof Request ? urlOrRequest.method : 'GET')).toUpperCase();
+
+		if (method === 'GET') {
+			getCallCount++;
+			return new Response(`get-${getCallCount}`);
+		}
+
+		return new Response('mutated');
+	};
+
+	const cachedFetch = pipeline(
+		mockFetch,
+		fetchFunction => withHeaders(fetchFunction, async () => {
+			headerResolutionCount++;
+
+			if (headerResolutionCount === 2) {
+				await headerResolutionPromise;
+			}
+
+			return {};
+		}),
+		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+	);
+
+	const initialResponse = await cachedFetch('https://example.com/api');
+	t.is(await initialResponse.text(), 'get-1');
+
+	const pendingMutation = cachedFetch(new Request('https://example.com/api', {method: 'POST'}));
+	await Promise.resolve();
+
+	const overlappingGetResponse = await cachedFetch('https://example.com/api');
+	t.is(await overlappingGetResponse.text(), 'get-2');
+
+	resolveHeaders();
+
 	const mutationResponse = await pendingMutation;
 	t.is(await mutationResponse.text(), 'mutated');
 	t.is(getCallCount, 2);
@@ -2226,6 +2534,10 @@ test('cache is populated after concurrent requests resolve', async t => {
 test('mutation during in-flight GET prevents stale caching', async t => {
 	let callCount = 0;
 	let getResolve;
+	let resolveGetStarted;
+	const getStartedPromise = new Promise(resolve => {
+		resolveGetStarted = resolve;
+	});
 
 	const mockFetch = async (url, options = {}) => {
 		callCount++;
@@ -2235,6 +2547,7 @@ test('mutation during in-flight GET prevents stale caching', async t => {
 			// First GET is slow; wait for the mutation to happen
 			await new Promise(resolve => {
 				getResolve = resolve;
+				resolveGetStarted();
 			});
 
 			return Response.json({stale: true}, {
@@ -2257,6 +2570,7 @@ test('mutation during in-flight GET prevents stale caching', async t => {
 
 	// Start a slow GET
 	const slowGet = cachedFetch('https://example.com/api');
+	await getStartedPromise;
 
 	// While the GET is in-flight, mutate the same URL
 	await cachedFetch('https://example.com/api', {method: 'POST'});

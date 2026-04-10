@@ -34,10 +34,10 @@ function getRequestForHeaders(urlOrRequest) {
 
 const blockedJsonDefaultHeaderNames = blockedRequestBodyHeaderNames.filter(headerName => headerName !== 'content-type');
 
-function getJsonHeaders(fetchFunction, urlOrRequest, options) {
+async function getJsonHeaders(fetchFunction, urlOrRequest, options) {
 	const inheritedHeaderNames = options[inheritedRequestBodyHeaderNamesSymbol] ?? [];
 	const requestForHeaders = getRequestForHeaders(urlOrRequest);
-	const headers = new Headers(fetchFunction[resolveRequestHeadersSymbol]?.(requestForHeaders, options) ?? (requestForHeaders instanceof Request ? requestForHeaders.headers : undefined));
+	const headers = new Headers(await fetchFunction[resolveRequestHeadersSymbol]?.(requestForHeaders, options) ?? (requestForHeaders instanceof Request ? requestForHeaders.headers : undefined));
 	const callHeaders = new Headers(options.headers);
 	const contentType = callHeaders.get('content-type')
 		?? headers.get('content-type');
@@ -67,12 +67,12 @@ function getJsonBody(options) {
 	return JSON.stringify(options.body);
 }
 
-function getJsonRequestOptions(fetchFunction, urlOrRequest, options) {
+async function getJsonRequestOptions(fetchFunction, urlOrRequest, options) {
 	return {
 		...options,
 		[blockedDefaultHeaderNamesSymbol]: getBlockedJsonDefaultHeaderNames(options),
 		body: getJsonBody(options),
-		headers: getJsonHeaders(fetchFunction, urlOrRequest, options),
+		headers: await getJsonHeaders(fetchFunction, urlOrRequest, options),
 	};
 }
 
@@ -89,7 +89,7 @@ Returns a wrapped fetch function that automatically stringifies plain-object and
 export function withJsonBody(fetchFunction) {
 	const fetchWithJsonBody = async (urlOrRequest, options = {}) => {
 		if (shouldJsonifyBody(options.body)) {
-			options = getJsonRequestOptions(fetchFunction, urlOrRequest, options);
+			options = await getJsonRequestOptions(fetchFunction, urlOrRequest, options);
 		}
 
 		return fetchFunction(urlOrRequest, options);

@@ -9,7 +9,7 @@ This is a small in-memory cache, not a full HTTP cache. It memoizes plain uncond
 
 The cache key is the URL only, so `withCache()` only caches plain unconditional GET requests without request headers. If a GET request carries any explicit or inherited headers, including auth, cookies, or validators like `If-None-Match`, it is treated as uncacheable and bypasses this wrapper's in-memory cache. With `cache: 'only-if-cached'`, that still means a cache miss and the wrapper returns its synthetic `504` response.
 
-Place `withCache` after `withBaseUrl` in a pipeline so the cache key is the resolved absolute URL, and before `withHttpError` so cached responses still get error-checked.
+In documented `pipeline()` order, place `withCache` after `withBaseUrl` so the cache key is the resolved absolute URL, and before `withHttpError` so cached responses still get error-checked.
 
 If you need to limit the number of cached entries, you can use a [`quick-lru`](https://github.com/sindresorhus/quick-lru) instance as the basis for a custom wrapper, since it implements the `Map` interface with a `maxSize` option.
 

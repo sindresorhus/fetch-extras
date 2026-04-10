@@ -3,6 +3,8 @@ Pipes a value through a series of functions, left to right.
 
 This is a convenience for composing `with*` functions without deep nesting. Without `pipeline()`, the same composition would need nested `with*` calls.
 
+For `with*` wrappers, that left-to-right `pipeline()` order is the canonical documented order throughout this package. The resulting runtime wrapper nesting is the inverse of that order.
+
 You can write:
 
 ```
@@ -16,6 +18,20 @@ const apiFetch = pipeline(
 ```
 
 Functions are applied left to right: the first function receives the initial value, the second receives the result of the first, and so on.
+
+Equivalent nested form:
+
+```
+const apiFetch = withHttpError(
+	withHeaders(
+		withBaseUrl(
+			withTimeout(fetch, 5000),
+			'https://api.example.com',
+		),
+		{Authorization: 'Bearer token'},
+	),
+);
+```
 
 @param value - The initial value to pipe through.
 @param functions - Functions to apply in order. Each function receives the previous function's return value and may return a different type.

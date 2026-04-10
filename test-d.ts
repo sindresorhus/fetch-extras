@@ -81,6 +81,8 @@ const apiFetch = pipeline(
 	fetchFunction => withTimeout(fetchFunction, 5000),
 	fetchFunction => withBaseUrl(fetchFunction, 'https://api.example.com'),
 	fetchFunction => withHeaders(fetchFunction, new Headers({authorization: 'Bearer token'})),
+	fetchFunction => withHeaders(fetchFunction, () => ({authorization: 'Bearer token'})),
+	fetchFunction => withHeaders(fetchFunction, async () => ({authorization: 'Bearer token'})),
 	withHttpError,
 );
 

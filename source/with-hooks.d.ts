@@ -13,7 +13,7 @@ type HookResponse<FetchFunction extends typeof fetch> = Awaited<ReturnType<Fetch
 /**
 Wraps a fetch function with hooks that run before each request and after each response.
 
-This is the recommended way to add custom logic (logging, metrics, dynamic headers, response transformation) in the documented pipeline position after request-building wrappers, `withRetry()`, and `withTokenRefresh()`, but before `withHttpError()`. When combined with `withTokenRefresh()`, hooks observe the public call and the final response returned to the caller. The internal refresh retry is not re-hooked.
+This is the recommended way to add custom logic (logging, metrics, dynamic headers, response transformation) in documented `pipeline()` order after request-building wrappers, `withRetry()`, and `withTokenRefresh()`, but before `withHttpError()`. When combined with `withTokenRefresh()`, hooks observe the public call and the final response returned to the caller. The internal refresh retry is not re-hooked.
 
 Can be combined with other `with*` functions:
 

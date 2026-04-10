@@ -441,6 +441,22 @@ test('respects Content-Type set by withHeaders when withHeaders is outer', async
 	t.is(options.headers.get('content-type'), 'application/vnd.api+json');
 });
 
+test('respects Content-Type set by async withHeaders in documented pipeline order', async t => {
+	const mockFetch = createCapturingFetch();
+
+	const apiFetch = pipeline(
+		mockFetch,
+		f => withHeaders(f, async () => ({'Content-Type': 'application/vnd.api+json'})),
+		withJsonBody,
+	);
+
+	await apiFetch('/api', {method: 'POST', body: {name: 'Alice'}});
+
+	const {options} = mockFetch.calls[0];
+	t.is(options.body, '{"name":"Alice"}');
+	t.is(options.headers.get('content-type'), 'application/vnd.api+json');
+});
+
 test('handles body with toJSON method', async t => {
 	const mockFetch = createCapturingFetch();
 	const fetchWithJson = withJsonBody(mockFetch);

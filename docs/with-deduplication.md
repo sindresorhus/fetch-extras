@@ -20,10 +20,10 @@ A wrapped fetch function that deduplicates concurrent plain GET URL requests.
 > Deduplication only applies when you call the wrapper with a URL and no non-empty `RequestInit`. An empty `{}` is treated the same as omitting the second argument so transparent outer wrappers like `withHttpError` still compose correctly.
 
 > [!NOTE]
-> `withDeduplication` does not deduplicate fetch functions already wrapped with `withTimeout`. Place `withTimeout` outside `withDeduplication` if you need per-call timeout behavior.
+> `withDeduplication` does not deduplicate fetch functions already wrapped with `withTimeout`. In documented `pipeline()` order, place `withTimeout` before `withDeduplication` if you need per-call timeout behavior.
 
 > [!TIP]
-> Place `withDeduplication` after `withBaseUrl` in a pipeline so the deduplication key is the resolved absolute URL.
+> In documented `pipeline()` order, place `withDeduplication` after `withBaseUrl` so the deduplication key is the resolved absolute URL.
 
 ## Example
 

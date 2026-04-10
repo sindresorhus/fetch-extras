@@ -11,7 +11,7 @@ Concurrent 401 responses that overlap while a refresh is still pending share a s
 
 > Note: Wrappers outside `withTokenRefresh()` only observe the initial call, not the internal retry. For example, if you want upload progress for both the first send and the retry, compose `withUploadProgress()` inside `withTokenRefresh()`.
 
-Can be combined with other `with*` functions. Should be composed inside `withHttpError` so it can see the raw 401 response:
+Can be combined with other `with*` functions. In documented `pipeline()` order, place `withTokenRefresh` before `withHttpError` so it can see the raw 401 response:
 
 ```
 const apiFetch = pipeline(

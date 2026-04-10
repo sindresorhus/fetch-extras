@@ -1,10 +1,14 @@
 import {
 	copyFetchMetadata,
 	defersFetchStartSymbol,
+	getRequestReplayHeaders,
 	hasHeaders,
+	hasResolvedRequestHeaders,
 	notifyFetchStartSymbol,
 	resolveRequestHeadersSymbol,
 	resolveRequestUrl,
+	withFetchSignal,
+	withResolvedRequestHeaders,
 } from './utilities.js';
 
 const nonInvalidatingMethods = new Set(['HEAD', 'OPTIONS', 'TRACE']);
@@ -21,16 +25,6 @@ const defaultCacheableRequestState = (() => {
 	};
 })();
 
-function getHeaders(urlOrRequest, options) {
-	const resolvedHeaders = this?.[resolveRequestHeadersSymbol]?.(urlOrRequest, options);
-
-	if (resolvedHeaders) {
-		return new Headers(resolvedHeaders);
-	}
-
-	return new Headers(options.headers ?? (urlOrRequest instanceof Request ? urlOrRequest.headers : undefined));
-}
-
 function hasNonDefaultRequestState(urlOrRequest, options) {
 	const request = urlOrRequest instanceof Request ? urlOrRequest : undefined;
 
@@ -43,17 +37,42 @@ function hasNonDefaultRequestState(urlOrRequest, options) {
 	return false;
 }
 
+async function getRequestHeaders(fetchFunction, urlOrRequest, fetchOptions) {
+	const requestReplayHeaders = getRequestReplayHeaders(urlOrRequest, fetchOptions);
+
+	if (hasResolvedRequestHeaders(urlOrRequest, fetchOptions)) {
+		return requestReplayHeaders;
+	}
+
+	const requestHeaders = await fetchFunction[resolveRequestHeadersSymbol]?.(urlOrRequest, fetchOptions);
+	return requestHeaders ?? requestReplayHeaders;
+}
+
 function getRequestContext(fetchFunction, urlOrRequest, options) {
-	const headers = getHeaders.call(fetchFunction, urlOrRequest, options);
+	const fetchOptions = withFetchSignal(fetchFunction, urlOrRequest, options);
 
 	return {
 		method: (options.method ?? (urlOrRequest instanceof Request ? urlOrRequest.method : 'GET')).toUpperCase(),
 		url: resolveRequestUrl(fetchFunction, urlOrRequest),
 		cacheMode: options.cache ?? (urlOrRequest instanceof Request ? urlOrRequest.cache : undefined),
-		signal: options.signal ?? (urlOrRequest instanceof Request ? urlOrRequest.signal : undefined),
+		signal: fetchOptions.signal,
+		fetchOptions,
+	};
+}
+
+async function getGetRequestContext(fetchFunction, urlOrRequest, options, requestContext) {
+	const hasRequestHeaderResolver = fetchFunction[resolveRequestHeadersSymbol] !== undefined;
+	const headers = new Headers(await getRequestHeaders(fetchFunction, urlOrRequest, requestContext.fetchOptions));
+	const fetchOptions = hasRequestHeaderResolver
+		? withResolvedRequestHeaders(requestContext.fetchOptions, headers)
+		: requestContext.fetchOptions;
+
+	return {
+		...requestContext,
 		isRangedRequest: headers.has('range'),
 		hasRequestHeaders: hasHeaders(headers),
 		hasNonDefaultRequestState: hasNonDefaultRequestState(urlOrRequest, options),
+		fetchOptions,
 	};
 }
 
@@ -138,23 +157,12 @@ export function withCache(fetchFunction, {ttl}) {
 	const resources = {cache, state};
 
 	const fetchWithCache = async (urlOrRequest, options = {}) => {
-		const {
-			method,
-			url,
-			cacheMode,
-			signal,
-			isRangedRequest,
-			hasRequestHeaders,
-			hasNonDefaultRequestState,
-		} = getRequestContext(fetchFunction, urlOrRequest, options);
-		const retainStaleEntry = cacheMode === 'force-cache' || cacheMode === 'only-if-cached';
-		const currentTime = evictExpiredEntries(cache, state, retainStaleEntry ? url : undefined);
-		const isCacheableRequest = !isRangedRequest && !hasRequestHeaders && !hasNonDefaultRequestState;
+		const {method, url, cacheMode, signal, fetchOptions} = getRequestContext(fetchFunction, urlOrRequest, options);
 
 		// Non-GET requests pass through; unsafe methods also invalidate cache
 		if (method !== 'GET') {
 			if (nonInvalidatingMethods.has(method)) {
-				return fetchFunction(urlOrRequest, options);
+				return fetchFunction(urlOrRequest, fetchOptions);
 			}
 
 			signal?.throwIfAborted();
@@ -174,12 +182,30 @@ export function withCache(fetchFunction, {ttl}) {
 
 				if (!fetchFunction[defersFetchStartSymbol]) {
 					invalidate();
-					return fetchFunction(urlOrRequest, options);
+					return fetchFunction(urlOrRequest, fetchOptions);
 				}
 
-				return fetchFunction(urlOrRequest, {...options, [notifyFetchStartSymbol]: invalidate});
+				return fetchFunction(urlOrRequest, {...fetchOptions, [notifyFetchStartSymbol]: invalidate});
 			});
 		}
+
+		const requestContext = {
+			method,
+			url,
+			cacheMode,
+			signal,
+			fetchOptions,
+		};
+		const generation = getGeneration(cache, state, url);
+		const {
+			isRangedRequest,
+			hasRequestHeaders,
+			hasNonDefaultRequestState,
+			fetchOptions: fetchOptionsWithHeaders,
+		} = await getGetRequestContext(fetchFunction, urlOrRequest, options, requestContext);
+		const retainStaleEntry = cacheMode === 'force-cache' || cacheMode === 'only-if-cached';
+		const currentTime = evictExpiredEntries(cache, state, retainStaleEntry ? url : undefined);
+		const isCacheableRequest = !isRangedRequest && !hasRequestHeaders && !hasNonDefaultRequestState;
 
 		signal?.throwIfAborted();
 
@@ -200,9 +226,8 @@ export function withCache(fetchFunction, {ttl}) {
 			return new Response(undefined, {status: 504, statusText: 'Gateway Timeout'});
 		}
 
-		const generation = getGeneration(cache, state, url);
 		return trackPending(resources, url, 'pendingGetCount', async () => {
-			const response = await fetchFunction(urlOrRequest, options);
+			const response = await fetchFunction(urlOrRequest, fetchOptionsWithHeaders);
 			const isPartialResponse = response.status === 206;
 
 			// Only cache successful responses.

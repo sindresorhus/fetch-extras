@@ -2,10 +2,12 @@ import parseLinkHeader from './parse-link-header.js';
 import {
 	blockedDefaultHeaderNamesSymbol,
 	delay,
+	markResolvedRequestHeaders,
 	requestBodyHeaderNames,
 	requestSnapshot,
-	resolveRequestHeaders,
 	resolveRequestBodyOptions,
+	resolveRequestHeaders,
+	resolveRequestHeadersSymbol,
 } from './utilities.js';
 
 const defaultPaginationOptions = {
@@ -126,6 +128,14 @@ const createRequestTemplate = (input, fetchOptions) => {
 	if (input instanceof Request && shouldResetBodyHeaders(fetchOptions)) {
 		// Replacing only the body should keep the inherited request headers, so defer to the platform behavior.
 		if (!shouldStripBodyHeaders(fetchOptions)) {
+			if ('headers' in fetchOptions) {
+				return new Request(input.url, {
+					...requestSnapshot(input),
+					...fetchOptions,
+					headers: new Headers(fetchOptions.headers),
+				});
+			}
+
 			return new Request(input, fetchOptions);
 		}
 
@@ -147,17 +157,50 @@ const createRequestTemplate = (input, fetchOptions) => {
 	return new Request(input, fetchOptions);
 };
 
-const createResolvedRequestTemplateState = (fetchFunction, input, fetchOptions) => {
-	const resolvedFetchOptions = resolveRequestBodyOptions(fetchFunction, input, fetchOptions);
-	const resolvedHeaders = resolveRequestHeaders(fetchFunction, input, resolvedFetchOptions);
-	const templateFetchOptions = resolvedHeaders === undefined
-		? resolvedFetchOptions
-		: {...resolvedFetchOptions, headers: resolvedHeaders};
+const cloneRequest = (url, request, headers = request.headers) => new Request(url, {
+	...requestSnapshot(request),
+	headers: new Headers(headers),
+	body: request.body ?? undefined,
+});
 
-	return {
-		requestTemplate: createRequestTemplate(input, templateFetchOptions),
-		fetchOptions: createTemplateFetchOptions(templateFetchOptions),
-	};
+const createResolvedRequestTemplate = async (fetchFunction, input, fetchOptions) => {
+	const bodyResolvedFetchOptions = resolveRequestBodyOptions(fetchFunction, input, fetchOptions);
+
+	// The template bakes in the resolved body; callers strip body/headers via createTemplateFetchOptions, so original fetchOptions is correct here.
+	return [
+		createRequestTemplate(input, bodyResolvedFetchOptions),
+		fetchOptions,
+	];
+};
+
+const createCurrentInput = async (fetchFunction, currentUrl, requestTemplate, fetchOptions) => {
+	const clonedTemplate = requestTemplate.clone();
+	const currentInput = cloneRequest(currentUrl, clonedTemplate);
+	const blockedDefaultHeaderNames = requestTemplate[blockedDefaultHeaderNamesSymbol];
+
+	if (blockedDefaultHeaderNames) {
+		markToBlockDefaultHeaders(currentInput, blockedDefaultHeaderNames);
+	}
+
+	if (fetchFunction[resolveRequestHeadersSymbol] === undefined) {
+		return currentInput;
+	}
+
+	/*
+	Boundary: later pages are new requests, not retries, so dynamic defaults from withHeaders() must be re-resolved here instead of being baked into the stored template.
+	The template only preserves replayable request state like the body and non-header RequestInit fields across pages.
+	*/
+	const resolvedHeaders = await resolveRequestHeaders(fetchFunction, currentInput, {
+		...fetchOptions,
+		signal: currentSignal(requestTemplate, fetchOptions),
+	});
+	const resolvedInput = cloneRequest(currentUrl, currentInput, resolvedHeaders);
+
+	if (blockedDefaultHeaderNames) {
+		markToBlockDefaultHeaders(resolvedInput, blockedDefaultHeaderNames);
+	}
+
+	return markResolvedRequestHeaders(resolvedInput);
 };
 
 const shouldUseRequestTemplateOnFirstRequest = (input, fetchOptions) => input instanceof Request || (absoluteUrl(input) && fetchOptions.body instanceof ReadableStream);
@@ -167,25 +210,21 @@ const currentSignal = (requestTemplate, fetchOptions) => fetchOptions.signal ?? 
 const getHeaderNames = headers => [...new Headers(headers).keys()];
 
 /*
-Boundary: following a Link header is not an HTTP redirect. We are constructing a new request for a new URL, often in environments like Node where callers can set arbitrary credential headers. The standards only special-case a few headers for browser-controlled redirects, which is not enough here because secrets often live in custom headers such as x-api-key. So when pagination crosses origins, inherited headers are cleared and only headers explicitly returned from pagination.paginate are kept for the new origin.
+Boundary: following a Link header is not an HTTP redirect. We are constructing a new request for a new URL, often in environments like Node where callers can set arbitrary credential headers. So when pagination crosses origins, only the carried request header state is cleared. Then inner wrappers such as withHeaders() run again for the next page.
 */
-const clearCrossOriginHeaderState = (fetchFunction, input, requestTemplate, fetchOptions) => {
-	const blockedHeaderNames = getHeaderNames(resolveRequestHeaders(fetchFunction, input, fetchOptions));
-	const nextFetchOptions = markToBlockDefaultHeaders(
-		'headers' in fetchOptions
-			? {
-				...fetchOptions,
-				headers: markToBlockDefaultHeaders(new Headers(), blockedHeaderNames),
-			}
-			: {...fetchOptions},
-		blockedHeaderNames,
-	);
+const clearCrossOriginHeaderState = (requestTemplate, fetchOptions) => {
+	const nextFetchOptions = 'headers' in fetchOptions
+		? {
+			...fetchOptions,
+			headers: new Headers(),
+		}
+		: {...fetchOptions};
 
 	return {
-		requestTemplate: requestTemplate && markToBlockDefaultHeaders(new Request(requestTemplate.url, {
+		requestTemplate: requestTemplate && new Request(requestTemplate.url, {
 			...requestSnapshot(requestTemplate),
 			headers: new Headers(),
-		}), blockedHeaderNames),
+		}),
 		currentFetchOptions: hasExplicitBody(fetchOptions) ? normalizeBodylessFetchOptions(nextFetchOptions) : nextFetchOptions,
 		inheritedStateOrigin: undefined,
 	};
@@ -296,9 +335,17 @@ export async function * paginate(input, options = {}) {
 	const allItems = [];
 	let {countLimit} = paginationOptions;
 	let numberOfRequests = 0;
-	let requestTemplate = shouldUseRequestTemplateOnFirstRequest(input, fetchOptions) ? createRequestTemplate(input, fetchOptions) : undefined;
+	const shouldUseRequestTemplate = shouldUseRequestTemplateOnFirstRequest(input, fetchOptions);
+	let requestTemplate;
+	let currentFetchOptions;
+
+	if (shouldUseRequestTemplate) {
+		[requestTemplate, currentFetchOptions] = await createResolvedRequestTemplate(fetchFunction, input, fetchOptions);
+	} else {
+		currentFetchOptions = normalizeFetchOptions(fetchOptions);
+	}
+
 	let currentUrl = requestTemplate ? new URL(requestTemplate.url) : input;
-	let currentFetchOptions = requestTemplate ? createTemplateFetchOptions(fetchOptions) : normalizeFetchOptions(fetchOptions);
 	let inheritedStateOrigin = absoluteUrl(requestTemplate ? requestTemplate.url : input);
 
 	while (numberOfRequests < paginationOptions.requestLimit && countLimit > 0) {
@@ -310,23 +357,29 @@ export async function * paginate(input, options = {}) {
 		let currentInput = currentUrl;
 
 		if (requestTemplate) {
-			currentInput = new Request(currentUrl, requestTemplate.clone());
-
-			if (requestTemplate[blockedDefaultHeaderNamesSymbol]) {
-				markToBlockDefaultHeaders(currentInput, requestTemplate[blockedDefaultHeaderNamesSymbol]);
-			}
+			// eslint-disable-next-line no-await-in-loop
+			currentInput = await createCurrentInput(fetchFunction, currentUrl, requestTemplate, currentFetchOptions);
 		}
 
 		// eslint-disable-next-line no-await-in-loop
-		const response = await fetchFunction(currentInput, currentFetchOptions);
+		const response = await fetchFunction(
+			currentInput,
+			requestTemplate ? createTemplateFetchOptions(currentFetchOptions) : currentFetchOptions,
+		);
 		const currentResponseUrl = responseUrl(response, currentUrl);
+		const shouldClearLaterStreamBody = !requestTemplate && currentFetchOptions.body instanceof ReadableStream;
+
+		if (shouldClearLaterStreamBody) {
+			currentFetchOptions = normalizeFetchOptions({
+				...currentFetchOptions,
+				body: undefined,
+			});
+		}
 
 		currentUrl = currentResponseUrl;
 
 		if (shouldStripInheritedHeaderState(inheritedStateOrigin, currentResponseUrl)) {
 			({requestTemplate, currentFetchOptions, inheritedStateOrigin} = clearCrossOriginHeaderState(
-				fetchFunction,
-				requestTemplate ?? currentUrl,
 				requestTemplate,
 				currentFetchOptions,
 			));
@@ -388,17 +441,8 @@ export async function * paginate(input, options = {}) {
 
 		const nextRequestUrl = absoluteUrl(nextPageOptions.url ?? currentUrl);
 
-		if (!requestTemplate && nextRequestUrl && Object.hasOwn(currentFetchOptions, 'body') && currentFetchOptions.body !== undefined) {
-			const requestTemplateState = createResolvedRequestTemplateState(fetchFunction, currentUrl, currentFetchOptions);
-			requestTemplate = requestTemplateState.requestTemplate;
-			currentFetchOptions = requestTemplateState.fetchOptions;
-			currentUrl = new URL(requestTemplate.url);
-		}
-
 		if (shouldStripInheritedHeaderState(inheritedStateOrigin, nextRequestUrl)) {
 			({requestTemplate, currentFetchOptions, inheritedStateOrigin} = clearCrossOriginHeaderState(
-				fetchFunction,
-				requestTemplate ?? currentUrl,
 				requestTemplate,
 				currentFetchOptions,
 			));
@@ -407,11 +451,19 @@ export async function * paginate(input, options = {}) {
 		const nextPageKeys = Object.keys(nextPageOptions);
 		if (nextPageKeys.length > 1 || (nextPageKeys.length === 1 && !nextPageOptions.url)) {
 			const {url: _, ...restNextPageOptions} = nextPageOptions;
-			const nextFetchOptions = {...currentFetchOptions, ...restNextPageOptions};
+			const nextFetchOptions = {
+				...(!requestTemplate && currentFetchOptions.body instanceof ReadableStream
+					? {
+						...currentFetchOptions,
+						body: undefined,
+					}
+					: currentFetchOptions),
+				...restNextPageOptions,
+			};
 
 			if (requestTemplate) {
 				requestTemplate = createRequestTemplate(requestTemplate, nextFetchOptions);
-				currentFetchOptions = createTemplateFetchOptions(nextFetchOptions);
+				currentFetchOptions = nextFetchOptions;
 			} else {
 				currentFetchOptions = normalizeFetchOptions(shouldClearInheritedBody(nextFetchOptions, restNextPageOptions) ? {...nextFetchOptions, body: undefined} : nextFetchOptions);
 			}

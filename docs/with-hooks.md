@@ -4,7 +4,7 @@
 
 Wraps a fetch function with hooks that run before each request and after each response.
 
-This is the recommended way to add custom logic (logging, metrics, dynamic headers, response transformation) in the documented pipeline position after request-building wrappers, `withRetry()`, and `withTokenRefresh()`, but before `withHttpError()`. When combined with `withTokenRefresh()`, hooks observe the public call and the final response returned to the caller. The internal refresh retry is not re-hooked.
+This is the recommended way to add custom logic (logging, metrics, dynamic headers, response transformation) in documented `pipeline()` order after request-building wrappers, `withRetry()`, and `withTokenRefresh()`, but before `withHttpError()`. When combined with `withTokenRefresh()`, hooks observe the public call and the final response returned to the caller. The internal refresh retry is not re-hooked.
 
 ## Parameters
 
@@ -24,7 +24,7 @@ A wrapped fetch function with hooks.
 > When returning modified options from `beforeRequest`, spread the original `options` to preserve any metadata set by upstream wrappers: `return {...options, headers: {...}}`.
 
 > [!TIP]
-> Place `withHooks` after request-building wrappers, `withRetry()`, and `withTokenRefresh()`, but before `withHttpError()`. In that order, `withRetry()` replays the same hooked request, while `withTokenRefresh()` remains a self-contained wrapper whose internal retry is not re-hooked.
+> In documented `pipeline()` order, place `withHooks` after request-building wrappers, `withRetry()`, and `withTokenRefresh()`, but before `withHttpError()`. In that order, `withRetry()` replays the same hooked request, while `withTokenRefresh()` remains a self-contained wrapper whose internal retry is not re-hooked.
 
 ## Example
 

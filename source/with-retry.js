@@ -4,13 +4,15 @@ import {
 	delay,
 	discardBody,
 	getFetchSignal,
+	getResolvedRequestHeaders,
 	getRequestSignal,
 	hasHeaders,
 	requestSnapshot,
 	resolveRequestBodyOptions,
-	resolveRequestHeaders,
+	resolveRequestHeadersSymbol,
 	resolveRequestUrl,
 	waitForAbortable,
+	withResolvedRequestHeaders,
 } from './utilities.js';
 
 const defaultRetriableMethods = new Set(['GET', 'HEAD', 'PUT', 'DELETE', 'OPTIONS', 'TRACE']);
@@ -43,6 +45,8 @@ Retries on network errors and configurable HTTP status codes. Only retries idemp
 When all retries are exhausted, the last response is returned (for HTTP status retries) or the last error is thrown (for network errors).
 
 Requests with a one-shot body provided via `options.body`, such as a `ReadableStream` or AsyncIterable, are sent as-is and are not retried. Retrying those uploads would require buffering and would change wrapper composition semantics such as upload progress. Requests whose body comes from a bare `Request` object (no `options.body` override) are also not retried.
+
+Retry replays the same logical request. If an inner wrapper resolves headers at request time, those resolved headers are kept stable for the retry batch instead of being recomputed on each attempt. If you need headers to change between attempts, use a wrapper with explicit retry-time semantics such as `withTokenRefresh()`, not generic retry.
 
 @param {typeof fetch} fetchFunction - The fetch function to wrap (usually the global `fetch`).
 @param {object} [options]
@@ -112,40 +116,45 @@ export function withRetry(fetchFunction, options = {}) {
 		const bodyResolvedFetchOptions = resolveRequestBodyOptions(fetchFunction, urlOrRequest, fetchOptions);
 		const canRetryBody = !(request?.body && fetchOptions.body === undefined) && !isNonReplayableBody(bodyResolvedFetchOptions.body);
 		const maximumAttempts = canRetryBody ? retries : 0;
-		const hasResolvedBody = bodyResolvedFetchOptions.body !== undefined;
-		const requestHeaders = hasResolvedBody
-			? resolveRequestHeaders(fetchFunction, urlOrRequest, fetchOptions)
+		/*
+		Boundary: retries are replaying the same logical request, so resolved headers from request-building wrappers must stay stable across attempts.
+		Wrappers that intentionally change auth state between attempts, such as withTokenRefresh(), should own that behavior explicitly instead of depending on generic retry to rebuild headers.
+		Still avoid calling resolveRequestHeaders() unless a wrapper actually provides it, because eagerly doing so would rerun outer wrappers like withHooks().
+		*/
+		const attemptSignal = getFetchSignal(fetchFunction, getRequestSignal(urlOrRequest, fetchOptions));
+		const shouldResolveHeaders = bodyResolvedFetchOptions.body !== undefined || fetchFunction[resolveRequestHeadersSymbol] !== undefined;
+		const requestHeaders = shouldResolveHeaders
+			? await getResolvedRequestHeaders(fetchFunction, urlOrRequest, attemptSignal ? {...fetchOptions, signal: attemptSignal} : fetchOptions)
 			: undefined;
-		const resolvedHeaders = requestHeaders && (request || fetchOptions.headers !== undefined || hasHeaders(requestHeaders))
+		const hasResolvedHeaders = requestHeaders !== undefined && (request || fetchOptions.headers !== undefined || fetchFunction[resolveRequestHeadersSymbol] !== undefined || hasHeaders(requestHeaders));
+		const resolvedHeaders = hasResolvedHeaders
 			? requestHeaders
 			: undefined;
-		const attemptSignal = getFetchSignal(fetchFunction, getRequestSignal(urlOrRequest, fetchOptions));
-		const currentOptionsBase = resolvedHeaders
-			? {...bodyResolvedFetchOptions, headers: resolvedHeaders}
-			: bodyResolvedFetchOptions;
-		const currentOptions = attemptSignal
+		let currentOptionsBase = bodyResolvedFetchOptions;
+
+		if (resolvedHeaders) {
+			currentOptionsBase = withResolvedRequestHeaders(bodyResolvedFetchOptions, resolvedHeaders);
+		}
+
+		const currentAttemptOptions = attemptSignal
 			? {...currentOptionsBase, signal: attemptSignal}
 			: currentOptionsBase;
-		const retryBaseOptions = resolvedHeaders
-			? currentOptionsBase
-			: currentOptions;
+		const retryBaseOptions = resolvedHeaders === undefined
+			? currentAttemptOptions
+			: currentOptionsBase;
 		const retryRequestInput = createRetryInput({
 			request,
 			fetchOptions,
 			retryBaseOptions,
 			urlOrRequest,
 		});
-		let retryOptions = retryBaseOptions;
-
-		if (attemptSignal) {
-			retryOptions = retryBaseOptions === fetchOptions
-				? currentOptions
-				: {...retryBaseOptions, signal: attemptSignal};
-		}
+		const retryOptions = attemptSignal && retryBaseOptions !== currentAttemptOptions
+			? {...retryBaseOptions, signal: attemptSignal}
+			: retryBaseOptions;
 
 		/* eslint-disable no-await-in-loop */
 		for (let attempt = 0; attempt <= maximumAttempts; attempt++) {
-			const attemptOptions = attempt === 0 ? currentOptions : retryOptions;
+			const attemptOptions = attempt === 0 ? currentAttemptOptions : retryOptions;
 			const isLastAttempt = attempt >= maximumAttempts;
 			let response;
 			try {

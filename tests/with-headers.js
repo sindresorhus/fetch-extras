@@ -265,3 +265,286 @@ test('withHeaders - explicit undefined options falls back to defaults', async t 
 	const {options} = mockFetch.calls[0];
 	t.is(options.headers.get('authorization'), 'Bearer token');
 });
+
+test('withHeaders - accepts a sync function that returns headers', async t => {
+	const mockFetch = createCapturingFetch();
+	const fetchWithHeaders = withHeaders(mockFetch, () => ({Authorization: 'Bearer dynamic-token'}));
+
+	await fetchWithHeaders('/api');
+
+	const {options} = mockFetch.calls[0];
+	t.is(options.headers.get('authorization'), 'Bearer dynamic-token');
+});
+
+test('withHeaders - accepts an async function that returns headers', async t => {
+	const mockFetch = createCapturingFetch();
+	const fetchWithHeaders = withHeaders(mockFetch, async () => ({Authorization: 'Bearer async-token'}));
+
+	await fetchWithHeaders('/api');
+
+	const {options} = mockFetch.calls[0];
+	t.is(options.headers.get('authorization'), 'Bearer async-token');
+});
+
+test('withHeaders - already-aborted requests do not await async default headers', async t => {
+	const mockFetch = createCapturingFetch();
+	const abortController = new AbortController();
+	let didCallResolver = false;
+	const fetchWithHeaders = withHeaders(mockFetch, async () => {
+		didCallResolver = true;
+		return {Authorization: 'Bearer async-token'};
+	});
+
+	abortController.abort();
+
+	await t.throwsAsync(fetchWithHeaders('/api', {signal: abortController.signal}), {name: 'AbortError'});
+	t.false(didCallResolver);
+	t.is(mockFetch.calls.length, 0);
+});
+
+test('withHeaders - abort interrupts pending async default headers', async t => {
+	const mockFetch = createCapturingFetch();
+	const abortController = new AbortController();
+	let resolveDefaultHeaders;
+	let notifyStarted;
+	const started = new Promise(resolve => {
+		notifyStarted = resolve;
+	});
+	const fetchWithHeaders = withHeaders(mockFetch, async () => {
+		notifyStarted();
+		return new Promise(resolve => {
+			resolveDefaultHeaders = resolve;
+		});
+	});
+
+	const pendingRequest = fetchWithHeaders('/api', {signal: abortController.signal});
+	await started;
+	abortController.abort();
+
+	await t.throwsAsync(pendingRequest, {name: 'AbortError'});
+	resolveDefaultHeaders({Authorization: 'Bearer async-token'});
+	t.is(mockFetch.calls.length, 0);
+});
+
+test('withHeaders - function is called on every request', async t => {
+	const mockFetch = createCapturingFetch();
+	let callCount = 0;
+	const fetchWithHeaders = withHeaders(mockFetch, () => {
+		callCount++;
+		return {'X-Count': String(callCount)};
+	});
+
+	await fetchWithHeaders('/api');
+	await fetchWithHeaders('/api');
+	await fetchWithHeaders('/api');
+
+	t.is(callCount, 3);
+	t.is(mockFetch.calls[0].options.headers.get('x-count'), '1');
+	t.is(mockFetch.calls[1].options.headers.get('x-count'), '2');
+	t.is(mockFetch.calls[2].options.headers.get('x-count'), '3');
+});
+
+test('withHeaders - per-call headers override function-returned defaults', async t => {
+	const mockFetch = createCapturingFetch();
+	const fetchWithHeaders = withHeaders(mockFetch, () => ({
+		Authorization: 'Bearer default',
+		'X-Default': 'yes',
+	}));
+
+	await fetchWithHeaders('/api', {headers: {Authorization: 'Bearer override'}});
+
+	const {options} = mockFetch.calls[0];
+	t.is(options.headers.get('authorization'), 'Bearer override');
+	t.is(options.headers.get('x-default'), 'yes');
+});
+
+test('withHeaders - function-returned headers merge with Request headers', async t => {
+	const mockFetch = createCapturingFetch();
+	const fetchWithHeaders = withHeaders(mockFetch, () => ({'X-Default': 'yes'}));
+
+	const request = new Request('https://example.com/api', {headers: {Authorization: 'Bearer from-request'}});
+	await fetchWithHeaders(request);
+
+	const {options} = mockFetch.calls[0];
+	t.is(options.headers.get('authorization'), 'Bearer from-request');
+	t.is(options.headers.get('x-default'), 'yes');
+});
+
+test('withHeaders - function returning Headers instance', async t => {
+	const mockFetch = createCapturingFetch();
+	const fetchWithHeaders = withHeaders(mockFetch, () => new Headers({Authorization: 'Bearer from-headers-instance'}));
+
+	await fetchWithHeaders('/api');
+
+	const {options} = mockFetch.calls[0];
+	t.is(options.headers.get('authorization'), 'Bearer from-headers-instance');
+});
+
+test('withHeaders - function returning array of tuples', async t => {
+	const mockFetch = createCapturingFetch();
+	const fetchWithHeaders = withHeaders(mockFetch, () => [['Authorization', 'Bearer from-tuples'], ['X-Custom', 'value']]);
+
+	await fetchWithHeaders('/api');
+
+	const {options} = mockFetch.calls[0];
+	t.is(options.headers.get('authorization'), 'Bearer from-tuples');
+	t.is(options.headers.get('x-custom'), 'value');
+});
+
+test('withHeaders - composed wrappers with mixed function and static headers', async t => {
+	const mockFetch = createCapturingFetch();
+	const innerFetch = withHeaders(mockFetch, {'X-Inner': 'inner', Authorization: 'inner-token'});
+	const outerFetch = withHeaders(innerFetch, () => ({'X-Outer': 'outer', Authorization: 'outer-token'}));
+
+	await outerFetch('/api', {headers: {'X-Call': 'call'}});
+
+	const {options} = mockFetch.calls[0];
+	t.is(options.headers.get('x-inner'), 'inner');
+	t.is(options.headers.get('x-outer'), 'outer');
+	t.is(options.headers.get('x-call'), 'call');
+	t.is(options.headers.get('authorization'), 'outer-token');
+});
+
+test('withHeaders - body-header inheritance with function-based defaults', async t => {
+	const mockFetch = createCapturingFetch();
+	const fetchWithHeaders = withHeaders(mockFetch, () => ({'X-Default': 'yes'}));
+
+	const request = new Request('https://example.com/api', {
+		method: 'POST',
+		body: JSON.stringify({old: true}),
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: 'Bearer from-request',
+		},
+	});
+
+	await fetchWithHeaders(request, {body: 'replacement body'});
+
+	const {options} = mockFetch.calls[0];
+	t.is(options.headers.get('content-type'), 'application/json');
+	t.is(options.headers.get('authorization'), 'Bearer from-request');
+	t.is(options.headers.get('x-default'), 'yes');
+});
+
+test('withHeaders - body-header inheritance with function-based defaults that include body headers', async t => {
+	const mockFetch = createCapturingFetch();
+	const fetchWithHeaders = withHeaders(mockFetch, () => ({
+		'Content-Type': 'application/json',
+		'Content-Language': 'fr',
+		'X-Default': 'yes',
+	}));
+
+	const request = new Request('https://example.com/api', {
+		method: 'POST',
+		body: 'old body',
+		headers: {
+			Authorization: 'Bearer from-request',
+		},
+	});
+
+	await fetchWithHeaders(request, {body: 'replacement body'});
+
+	const {options} = mockFetch.calls[0];
+	// Request's auto-assigned Content-Type differs from function default, so it's inherited
+	t.is(options.headers.get('content-type'), 'text/plain;charset=UTF-8');
+	t.is(options.headers.get('content-language'), 'fr');
+	t.is(options.headers.get('authorization'), 'Bearer from-request');
+	t.is(options.headers.get('x-default'), 'yes');
+});
+
+test('withHeaders - function calls do not share header state across requests', async t => {
+	const mockFetch = createCapturingFetch();
+	const fetchWithHeaders = withHeaders(mockFetch, () => ({Authorization: 'Bearer token'}));
+
+	await fetchWithHeaders('/api', {headers: {'X-Extra': 'only-first-call'}});
+	await fetchWithHeaders('/api');
+
+	t.is(mockFetch.calls[1].options.headers.get('x-extra'), null);
+	t.is(mockFetch.calls[1].options.headers.get('authorization'), 'Bearer token');
+});
+
+test('withHeaders - function header name matching is case-insensitive', async t => {
+	const mockFetch = createCapturingFetch();
+	const fetchWithHeaders = withHeaders(mockFetch, () => ({'Content-Type': 'text/plain'}));
+
+	await fetchWithHeaders('/api', {headers: {'content-type': 'application/json'}});
+
+	const {options} = mockFetch.calls[0];
+	t.is(options.headers.get('content-type'), 'application/json');
+	t.is([...options.headers].filter(([key]) => key === 'content-type').length, 1);
+});
+
+test('withHeaders - concurrent requests with function-based headers resolve independently', async t => {
+	const mockFetch = createCapturingFetch();
+	let callCount = 0;
+	const fetchWithHeaders = withHeaders(mockFetch, async () => {
+		callCount++;
+		const current = callCount;
+		// Simulate async delay so requests overlap
+		await new Promise(resolve => {
+			setTimeout(resolve, 10);
+		});
+		return {'X-Request-Id': String(current)};
+	});
+
+	await Promise.all([
+		fetchWithHeaders('/api/1'),
+		fetchWithHeaders('/api/2'),
+		fetchWithHeaders('/api/3'),
+	]);
+
+	t.is(callCount, 3);
+	const ids = new Set([
+		mockFetch.calls[0].options.headers.get('x-request-id'),
+		mockFetch.calls[1].options.headers.get('x-request-id'),
+		mockFetch.calls[2].options.headers.get('x-request-id'),
+	]);
+	t.is(ids.size, 3);
+});
+
+test('withHeaders - sync function that throws propagates error', async t => {
+	const mockFetch = createCapturingFetch();
+	const fetchWithHeaders = withHeaders(mockFetch, () => {
+		throw new Error('header resolution failed');
+	});
+
+	await t.throwsAsync(fetchWithHeaders('/api'), {message: 'header resolution failed'});
+	t.is(mockFetch.calls.length, 0);
+});
+
+test('withHeaders - async function that rejects propagates error', async t => {
+	const mockFetch = createCapturingFetch();
+	const fetchWithHeaders = withHeaders(mockFetch, async () => {
+		throw new Error('async header resolution failed');
+	});
+
+	await t.throwsAsync(fetchWithHeaders('/api'), {message: 'async header resolution failed'});
+	t.is(mockFetch.calls.length, 0);
+});
+
+test('withHeaders - function returning empty object applies per-call headers', async t => {
+	const mockFetch = createCapturingFetch();
+	const fetchWithHeaders = withHeaders(mockFetch, () => ({}));
+
+	await fetchWithHeaders('/api', {headers: {'X-Custom': 'value'}});
+
+	const {options} = mockFetch.calls[0];
+	t.is(options.headers.get('x-custom'), 'value');
+});
+
+test('withHeaders - already-aborted Request.signal does not await async default headers', async t => {
+	const mockFetch = createCapturingFetch();
+	const abortController = new AbortController();
+	let didCallResolver = false;
+	const fetchWithHeaders = withHeaders(mockFetch, async () => {
+		didCallResolver = true;
+		return {Authorization: 'Bearer async-token'};
+	});
+
+	abortController.abort();
+	const request = new Request('https://example.com/api', {signal: abortController.signal});
+
+	await t.throwsAsync(fetchWithHeaders(request), {name: 'AbortError'});
+	t.false(didCallResolver);
+	t.is(mockFetch.calls.length, 0);
+});

@@ -1,17 +1,21 @@
 /**
 Wraps a fetch function to automatically retry failed requests.
 
-Retries on network errors and configurable HTTP status codes. Only retries idempotent methods by default (GET, HEAD, PUT, DELETE, OPTIONS, TRACE). Uses exponential backoff with jitter by default. Respects the `Retry-After` response header when present.
+Retries on network errors and configurable HTTP status codes. Only retries idempotent methods by default (GET, HEAD, PUT, DELETE, OPTIONS, TRACE). Uses exponential backoff with jitter by default. Respects the `Retry-After` response header when present, and ignores malformed values by falling back to `backoff`.
 
 POST and PATCH are not retried by default because they are not idempotent. Add them to `methods` if your endpoints are safe to retry.
 
 When all retries are exhausted, the last response is returned (for HTTP status retries) or the last error is thrown (for network errors).
 
-Place `withRetry` before `withHttpError` in a pipeline so it sees raw responses and can check status codes.
+In documented `pipeline()` order, place `withRetry` before `withHttpError` so it sees raw responses and can check status codes.
 
 Do not consume the `response` body inside `shouldRetry`. If you need to inspect the body, clone the response first.
 
 Requests with a one-shot body provided via `options.body`, such as a `ReadableStream` or AsyncIterable, are sent as-is and are not retried. Retrying those uploads would require buffering and would change wrapper composition semantics such as upload progress. Requests whose body comes from a bare `Request` object (no `options.body` override) are also not retried.
+
+`withRetry()` replays the same logical request on each attempt. If an inner wrapper resolves headers at request time, such as `withHeaders(fetch, async () => ...)`, those resolved headers are frozen for the retry batch so later attempts do not drift to a different token, nonce, or signature.
+
+If you need headers to change between attempts, use a wrapper with explicit retry-time semantics such as `withTokenRefresh()`, not generic retry.
 
 @param fetchFunction - The fetch function to wrap (usually the global `fetch`).
 @param options - Retry configuration.
@@ -29,10 +33,26 @@ const data = await response.json();
 
 @example
 ```
-import {pipeline, withHttpError, withRetry, withBaseUrl} from 'fetch-extras';
+import {withRetry} from 'fetch-extras';
+
+// With a custom backoff and conditional retry
+const fetchWithRetry = withRetry(fetch, {
+	retries: 5,
+	backoff: attemptNumber => attemptNumber * 1000, // Linear: 1s, 2s, 3s, ...
+	shouldRetry({response}) {
+		// Don't retry if the server says the resource is gone
+		return response?.status !== 410;
+	},
+});
+```
+
+@example
+```
+import {pipeline, withHttpError, withRetry, withBaseUrl, withTimeout} from 'fetch-extras';
 
 const apiFetch = pipeline(
 	fetch,
+	f => withTimeout(f, 10_000),
 	f => withBaseUrl(f, 'https://api.example.com'),
 	f => withRetry(f, {retries: 2}),
 	withHttpError,

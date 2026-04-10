@@ -8,7 +8,7 @@ import {
 	withTokenRefresh,
 	pipeline,
 } from '../source/index.js';
-import {timeoutDurationSymbol} from '../source/utilities.js';
+import {resolveRequestHeadersSymbol, timeoutDurationSymbol} from '../source/utilities.js';
 
 const createCapturingFetch = () => {
 	const calls = [];
@@ -20,6 +20,22 @@ const createCapturingFetch = () => {
 
 	mockFetch.calls = calls;
 	return mockFetch;
+};
+
+const createRecordingHooks = contexts => ({
+	beforeRequest(context) {
+		contexts.push({hook: 'beforeRequest', ...context});
+	},
+	afterResponse(context) {
+		contexts.push({hook: 'afterResponse', ...context});
+	},
+});
+
+const assertRecordedAuthorization = (t, contexts, value) => {
+	t.is(contexts[0].url, 'https://example.com/api');
+	t.is(new Headers(contexts[0].options.headers).get('authorization'), value);
+	t.is(contexts[1].url, 'https://example.com/api');
+	t.is(new Headers(contexts[1].options.headers).get('authorization'), value);
 };
 
 test('beforeRequest - receives resolved URL and options', async t => {
@@ -542,6 +558,171 @@ test('hooks receive effective request options in documented pipeline order', asy
 	t.is(new Headers(contexts[0].options.headers).get('authorization'), 'Bearer token');
 	t.is(contexts[1].url, 'https://example.com/api');
 	t.is(new Headers(contexts[1].options.headers).get('authorization'), 'Bearer token');
+});
+
+test('hooks receive function-based default headers in documented pipeline order', async t => {
+	const mockFetch = createCapturingFetch();
+	const contexts = [];
+
+	const fetchWithAll = pipeline(
+		mockFetch,
+		fetchFunction => withHeaders(fetchFunction, async () => ({authorization: 'Bearer dynamic-token'})),
+		fetchFunction => withHooks(fetchFunction, createRecordingHooks(contexts)),
+	);
+
+	await fetchWithAll('https://example.com/api');
+
+	assertRecordedAuthorization(t, contexts, 'Bearer dynamic-token');
+});
+
+test('hooks see per-call headers overriding function-based defaults in documented pipeline order', async t => {
+	const mockFetch = createCapturingFetch();
+	const contexts = [];
+
+	const fetchWithAll = pipeline(
+		mockFetch,
+		fetchFunction => withHeaders(fetchFunction, async () => ({
+			authorization: 'Bearer dynamic-token',
+			'x-default': 'yes',
+		})),
+		fetchFunction => withHooks(fetchFunction, createRecordingHooks(contexts)),
+	);
+
+	await fetchWithAll('https://example.com/api', {
+		headers: {
+			authorization: 'Bearer override-token',
+		},
+	});
+
+	assertRecordedAuthorization(t, contexts, 'Bearer override-token');
+	t.is(new Headers(contexts[0].options.headers).get('x-default'), 'yes');
+	t.is(new Headers(contexts[1].options.headers).get('x-default'), 'yes');
+});
+
+test('hooks and the actual request share the same resolved stateful default headers', async t => {
+	const mockFetch = createCapturingFetch();
+	const contexts = [];
+	let tokenNumber = 0;
+
+	const fetchWithAll = pipeline(
+		mockFetch,
+		fetchFunction => withHeaders(fetchFunction, () => {
+			tokenNumber++;
+			return {authorization: `Bearer token-${tokenNumber}`};
+		}),
+		fetchFunction => withHooks(fetchFunction, createRecordingHooks(contexts)),
+	);
+
+	await fetchWithAll('https://example.com/api');
+
+	const requestAuthorization = new Headers(mockFetch.calls[0].options.headers).get('authorization');
+	assertRecordedAuthorization(t, contexts, requestAuthorization);
+});
+
+test('hooks and the actual request share the same resolved custom request headers', async t => {
+	const mockFetch = createCapturingFetch();
+	const contexts = [];
+	let headerNumber = 0;
+
+	mockFetch[resolveRequestHeadersSymbol] = function () {
+		headerNumber++;
+		return new Headers({'x-dynamic': `value-${headerNumber}`});
+	};
+
+	const fetchWithHooks = withHooks(mockFetch, createRecordingHooks(contexts));
+
+	await fetchWithHooks('https://example.com/api');
+
+	const requestHeader = new Headers(mockFetch.calls[0].options.headers).get('x-dynamic');
+	t.is(requestHeader, 'value-1');
+	t.is(new Headers(contexts[0].options.headers).get('x-dynamic'), requestHeader);
+	t.is(new Headers(contexts[1].options.headers).get('x-dynamic'), requestHeader);
+	t.is(headerNumber, 1);
+});
+
+test('beforeRequest that returns new options re-resolves function-based headers', async t => {
+	const mockFetch = createCapturingFetch();
+	let resolverCallCount = 0;
+
+	const fetchWithAll = pipeline(
+		mockFetch,
+		fetchFunction => withHeaders(fetchFunction, () => {
+			resolverCallCount++;
+			return {authorization: `Bearer token-${resolverCallCount}`};
+		}),
+		fetchFunction => withHooks(fetchFunction, {
+			beforeRequest({options}) {
+				return {
+					...options,
+					headers: {
+						...Object.fromEntries(new Headers(options.headers)),
+						'x-custom': 'injected',
+					},
+				};
+			},
+		}),
+	);
+
+	await fetchWithAll('https://example.com/api');
+
+	const headers = new Headers(mockFetch.calls[0].options.headers);
+	t.is(headers.get('x-custom'), 'injected');
+	// The first resolution's authorization becomes a call header that overrides the re-resolved default
+	t.is(headers.get('authorization'), 'Bearer token-1');
+	t.is(resolverCallCount, 2);
+});
+
+test('beforeRequest that returns new options re-resolves custom resolved request headers', async t => {
+	const mockFetch = createCapturingFetch();
+	let resolverCallCount = 0;
+
+	mockFetch[resolveRequestHeadersSymbol] = function (_urlOrRequest, options = {}) {
+		resolverCallCount++;
+		return new Headers({
+			'x-dynamic': `${options.headers?.['x-custom'] ?? 'original'}-${resolverCallCount}`,
+		});
+	};
+
+	const fetchWithHooks = withHooks(mockFetch, {
+		beforeRequest({options}) {
+			return {
+				...options,
+				headers: {
+					'x-custom': 'updated',
+				},
+			};
+		},
+	});
+
+	await fetchWithHooks('https://example.com/api');
+
+	const headers = new Headers(mockFetch.calls[0].options.headers);
+	t.is(headers.get('x-dynamic'), 'updated-2');
+	t.is(resolverCallCount, 2);
+});
+
+test('afterResponse sees the same resolved function-based headers as beforeRequest', async t => {
+	const mockFetch = createCapturingFetch();
+	let beforeHeaders;
+	let afterHeaders;
+
+	const fetchWithAll = pipeline(
+		mockFetch,
+		fetchFunction => withHeaders(fetchFunction, async () => ({'x-dynamic': 'resolved'})),
+		fetchFunction => withHooks(fetchFunction, {
+			beforeRequest({options}) {
+				beforeHeaders = new Headers(options.headers).get('x-dynamic');
+			},
+			afterResponse({options}) {
+				afterHeaders = new Headers(options.headers).get('x-dynamic');
+			},
+		}),
+	);
+
+	await fetchWithAll('https://example.com/api');
+
+	t.is(beforeHeaders, 'resolved');
+	t.is(afterHeaders, 'resolved');
 });
 
 test('only afterResponse without beforeRequest', async t => {

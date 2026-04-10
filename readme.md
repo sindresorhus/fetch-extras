@@ -54,11 +54,13 @@ const apiFetch = pipeline(
 const data = await apiFetch('/users');
 ```
 
+`pipeline()` order is the documented order throughout this package. Runtime wrapper nesting is the inverse, so `pipeline(fetch, f => withTimeout(f, 5000), f => withHeaders(f, headers))` becomes `withHeaders(withTimeout(fetch, 5000), headers)`.
+
 ## API
 
 ### Wrappers
 
-Listed in the recommended wrapping order for use with [`pipeline`](docs/pipeline.md).
+Listed in the recommended [`pipeline`](docs/pipeline.md) order. Read the list top to bottom as the order you pass wrappers to `pipeline()`.
 
 - [`withTimeout`](docs/with-timeout.md) - Abort requests that take too long
 - [`withBaseUrl`](docs/with-base-url.md) - Resolve relative URLs against a base URL

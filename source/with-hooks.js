@@ -2,15 +2,16 @@ import {
 	copyFetchMetadata,
 	defersFetchStartSymbol,
 	getFetchSignal,
+	getResolvedRequestHeaders,
 	getRequestOptions,
 	getRequestSignal,
 	notifyFetchStart,
 	resolveRequestBody,
 	resolveRequestBodySymbol,
-	resolveRequestHeaders,
 	resolveRequestHeadersSymbol,
 	resolveRequestUrl,
 	waitForAbortable,
+	withResolvedRequestHeaders,
 } from './utilities.js';
 
 const inheritedHookBodies = new WeakSet();
@@ -22,7 +23,7 @@ Design note: `withHooks` is one function rather than separate `withBeforeRequest
 /**
 Wraps a fetch function with hooks that run before each request and after each response.
 
-This is the recommended way to add custom logic (logging, metrics, dynamic headers, response transformation) in the documented pipeline position after request-building wrappers, `withRetry()`, and `withTokenRefresh()`, but before `withHttpError()`. When combined with `withTokenRefresh()`, hooks observe the public call and the final response returned to the caller. The internal refresh retry is not re-hooked.
+This is the recommended way to add custom logic (logging, metrics, dynamic headers, response transformation) in documented `pipeline()` order after request-building wrappers, `withRetry()`, and `withTokenRefresh()`, but before `withHttpError()`. When combined with `withTokenRefresh()`, hooks observe the public call and the final response returned to the caller. The internal refresh retry is not re-hooked.
 
 @param {typeof fetch} fetchFunction - The fetch function to wrap (usually the global `fetch`).
 @param {object} [options]
@@ -39,9 +40,14 @@ export function withHooks(fetchFunction, {beforeRequest, afterResponse} = {}) {
 		});
 	};
 
-	const getFetchOptions = (urlOrRequest, options, signal) => {
+	const getFetchOptions = (urlOrRequest, options, signal, headers) => {
 		// Strip the prototype-only inherited body marker before calling the inner fetch so no-op hooks do not change downstream wrapper semantics.
-		const fetchOptions = inheritedHookBodies.has(options) ? {...options} : options;
+		let fetchOptions = inheritedHookBodies.has(options) ? {...options} : options;
+
+		if (headers !== undefined) {
+			fetchOptions = withResolvedRequestHeaders(fetchOptions, headers);
+		}
+
 		const requestSignal = getRequestSignal(urlOrRequest, fetchOptions);
 		return requestSignal === signal
 			? fetchOptions
@@ -59,12 +65,11 @@ export function withHooks(fetchFunction, {beforeRequest, afterResponse} = {}) {
 	const fetchWithHooks = async (urlOrRequest, options = {}) => {
 		const getLifecycleSignal = options_ => getFetchSignal(fetchFunction, getRequestSignal(urlOrRequest, options_));
 
-		const getHookOptions = (options_ = {}) => {
-			const lifecycleSignal = getLifecycleSignal(options_);
+		const getHookOptions = async (options_ = {}) => {
 			const effectiveOptions = getRequestOptions(urlOrRequest, options_);
 
 			if (urlOrRequest instanceof Request || fetchFunction[resolveRequestHeadersSymbol] !== undefined) {
-				effectiveOptions.headers = Object.fromEntries(resolveRequestHeaders(fetchFunction, urlOrRequest, options_));
+				effectiveOptions.headers = Object.fromEntries(await getResolvedRequestHeaders(fetchFunction, urlOrRequest, options_));
 			}
 
 			if (urlOrRequest instanceof Request || fetchFunction[resolveRequestBodySymbol] !== undefined) {
@@ -77,6 +82,8 @@ export function withHooks(fetchFunction, {beforeRequest, afterResponse} = {}) {
 				}
 			}
 
+			const lifecycleSignal = getLifecycleSignal(options_);
+
 			if (lifecycleSignal !== undefined) {
 				effectiveOptions.signal = lifecycleSignal;
 			}
@@ -85,7 +92,7 @@ export function withHooks(fetchFunction, {beforeRequest, afterResponse} = {}) {
 		};
 
 		const url = resolveRequestUrl(fetchFunction, urlOrRequest);
-		let hookOptions = getHookOptions(options);
+		let hookOptions = await getHookOptions(options);
 
 		if (beforeRequest) {
 			let result = await waitForAbortable(() => beforeRequest({url, options: hookOptions}), hookOptions.signal);
@@ -99,11 +106,11 @@ export function withHooks(fetchFunction, {beforeRequest, afterResponse} = {}) {
 				}
 
 				options = result;
-				hookOptions = getHookOptions(options);
+				hookOptions = await getHookOptions(options);
 			}
 		}
 
-		const finalFetchOptions = getFetchOptions(urlOrRequest, options, hookOptions.signal);
+		const finalFetchOptions = getFetchOptions(urlOrRequest, options, hookOptions.signal, hookOptions.headers);
 		const fetchInput = urlOrRequest instanceof Request && Object.hasOwn(finalFetchOptions, 'body') && finalFetchOptions.body === undefined
 			? url
 			: urlOrRequest;

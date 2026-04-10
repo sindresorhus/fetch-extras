@@ -24,7 +24,7 @@ A wrapped fetch function that caches GET responses.
 > The cache key is the URL only, so `withCache()` only caches plain unconditional GET requests in the default fetch mode. If a GET request carries any explicit or inherited headers, including auth, cookies, or validators like `If-None-Match`, or it changes request metadata like `credentials`, `integrity`, `mode`, `redirect`, `referrer`, or `referrerPolicy`, it is treated as uncacheable and bypasses this wrapper's in-memory cache. With `cache: 'only-if-cached'`, that still means a cache miss and the wrapper returns its synthetic `504` response.
 
 > [!TIP]
-> Place `withCache` after `withBaseUrl` in a pipeline so the cache key is the resolved absolute URL, and before `withHttpError` so cached responses still get error-checked.
+> In documented `pipeline()` order, place `withCache` after `withBaseUrl` so the cache key is the resolved absolute URL, and before `withHttpError` so cached responses still get error-checked.
 
 > [!TIP]
 > If you need to limit the number of cached entries, you can use a [`quick-lru`](https://github.com/sindresorhus/quick-lru) instance as the basis for a custom wrapper, since it implements the `Map` interface with a `maxSize` option.

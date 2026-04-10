@@ -3,24 +3,32 @@ import {
 	blockedDefaultHeaderNamesSymbol,
 	copyFetchMetadata,
 	deleteHeaders,
+	getRequestSignal,
+	hasResolvedRequestHeaders,
 	inheritedRequestBodyHeaderNamesSymbol,
-	resolveAuthorizationHeaderSymbol,
 	resolveRequestHeadersSymbol,
 	setHeaders,
+	waitForAbortable,
 } from './utilities.js';
 
 /**
-Wraps a fetch function to include default headers on every request. Per-call headers take priority over the defaults.
+Returns a wrapped fetch function that includes default headers on every request. Per-call headers take priority over the defaults, so you can always override a default on a specific request.
+
+Can be combined with other `with*` functions.
 
 @param {typeof fetch} fetchFunction - The fetch function to wrap (usually the global `fetch`).
-@param {HeadersInit} defaultHeaders - Default headers to include on every request.
+@param {HeadersInit | (() => HeadersInit | Promise<HeadersInit>)} defaultHeaders - Default headers to include on every request. Accepts a plain object, a `Headers` instance, an array of `[name, value]` tuples, or a function that returns any of these (sync or async). When a function is given, it is called on every request, which is useful for headers that need to be resolved at request time (for example, reading an auth token from storage).
 @returns {typeof fetch} A wrapped fetch function that merges the default headers into every request.
+
+The header function does not receive the request URL or options. If you need headers that vary per request, use `withHooks` with a `beforeRequest` hook instead.
+Function-based defaults are request-scoped, not sequence-scoped. Wrappers that replay the same request, such as `withRetry()`, freeze the resolved headers for that replay batch. Wrappers that build later requests, such as `paginate()`, re-resolve them for each request.
 */
 export function withHeaders(fetchFunction, defaultHeaders) {
-	const defaultHeadersObject = new Headers(defaultHeaders);
-
-	const getMergedHeaders = (urlOrRequest, options = {}) => {
-		const merged = new Headers(defaultHeaders);
+	const isFunction = typeof defaultHeaders === 'function';
+	const staticDefaultHeaders = isFunction ? undefined : new Headers(defaultHeaders);
+	const resolveDefaultHeaders = isFunction ? defaultHeaders : () => staticDefaultHeaders;
+	const getMergedHeaders = (urlOrRequest, resolvedDefaults, options = {}) => {
+		const merged = new Headers(resolvedDefaults);
 		const requestHeaders = urlOrRequest instanceof Request ? new Headers(urlOrRequest.headers) : undefined;
 		const callHeaders = options.headers ? new Headers(options.headers) : undefined;
 		const blockedDefaultHeaderNames = new Set([
@@ -41,23 +49,40 @@ export function withHeaders(fetchFunction, defaultHeaders) {
 		};
 	};
 
+	const resolveMergedHeaderState = async (urlOrRequest, options = {}) => {
+		const resolvedDefaults = isFunction
+			? await waitForAbortable(resolveDefaultHeaders, getRequestSignal(urlOrRequest, options))
+			: staticDefaultHeaders;
+
+		return {
+			resolvedDefaults,
+			...getMergedHeaders(urlOrRequest, resolvedDefaults, options),
+		};
+	};
+
 	const fetchWithHeaders = async (urlOrRequest, options = {}) => {
+		if (hasResolvedRequestHeaders(urlOrRequest, options)) {
+			return fetchFunction(urlOrRequest, options);
+		}
+
 		const {
+			resolvedDefaults,
 			merged,
 			requestHeaders,
 			callHeaders,
 			blockedDefaultHeaderNames,
-		} = getMergedHeaders(urlOrRequest, options);
+		} = await resolveMergedHeaderState(urlOrRequest, options);
 
 		const shouldTreatRequestBodyHeadersAsInherited = requestHeaders
 			&& options.body !== undefined
 			&& !blockedRequestBodyHeaderNames.some(headerName => blockedDefaultHeaderNames.has(headerName));
 
 		if (shouldTreatRequestBodyHeadersAsInherited) {
+			const resolvedDefaultHeaders = new Headers(resolvedDefaults);
 			const inheritedHeaderNames = blockedRequestBodyHeaderNames.filter(headerName =>
 				requestHeaders.has(headerName)
 				&& !callHeaders?.has(headerName)
-				&& defaultHeadersObject.get(headerName) !== requestHeaders.get(headerName),
+				&& resolvedDefaultHeaders.get(headerName) !== requestHeaders.get(headerName),
 			);
 
 			if (inheritedHeaderNames.length > 0) {
@@ -71,22 +96,8 @@ export function withHeaders(fetchFunction, defaultHeaders) {
 		return fetchFunction(urlOrRequest, {...options, headers: merged});
 	};
 
-	fetchWithHeaders[resolveAuthorizationHeaderSymbol] = function (urlOrRequest, options = {}) {
-		const mergedHeaders = getMergedHeaders(urlOrRequest, options).merged;
-		const authorization = mergedHeaders.get('Authorization');
-
-		if (authorization !== null) {
-			return authorization;
-		}
-
-		return fetchFunction[resolveAuthorizationHeaderSymbol]?.(urlOrRequest, {
-			...options,
-			headers: mergedHeaders,
-		});
-	};
-
-	fetchWithHeaders[resolveRequestHeadersSymbol] = function (urlOrRequest, options = {}) {
-		const mergedHeaders = getMergedHeaders(urlOrRequest, options).merged;
+	fetchWithHeaders[resolveRequestHeadersSymbol] = async function (urlOrRequest, options = {}) {
+		const {merged: mergedHeaders} = await resolveMergedHeaderState(urlOrRequest, options);
 
 		return fetchFunction[resolveRequestHeadersSymbol]?.(urlOrRequest, {
 			...options,

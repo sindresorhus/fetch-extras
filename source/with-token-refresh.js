@@ -5,8 +5,9 @@ import {
 	getRequestSignal,
 	hasHeaders,
 	resolveRequestBodyOptions,
+	resolveRequestHeadersSymbol,
 	resolveRequestHeaders,
-	resolveAuthorizationHeaderSymbol,
+	withResolvedRequestHeaders,
 } from './utilities.js';
 
 /**
@@ -126,11 +127,18 @@ export function withTokenRefresh(fetchFunction, {refreshToken}) {
 			: undefined;
 		const bodyResolvedOptions = resolveRequestBodyOptions(fetchFunction, urlOrRequest, options);
 		const signal = getFetchSignal(fetchFunction, getRequestSignal(urlOrRequest, options));
-		const requestHeaders = resolveRequestHeaders(fetchFunction, urlOrRequest, options);
-		const hasInitialHeaders = request || options.headers !== undefined || hasHeaders(requestHeaders);
-		let initialOptions = hasInitialHeaders
-			? {...bodyResolvedOptions, headers: requestHeaders}
-			: bodyResolvedOptions;
+		const requestHeaders = new Headers(await resolveRequestHeaders(fetchFunction, urlOrRequest, options));
+		const hasRequestHeaderResolver = fetchFunction[resolveRequestHeadersSymbol] !== undefined;
+		const hasInitialHeaders = request
+			|| options.headers !== undefined
+			|| hasRequestHeaderResolver
+			|| hasHeaders(requestHeaders);
+		let requestOptions = bodyResolvedOptions;
+
+		if (hasInitialHeaders) {
+			requestOptions = withResolvedRequestHeaders(bodyResolvedOptions, requestHeaders);
+		}
+
 		let retryBody = bodyResolvedOptions.body;
 		let hasRetryBody = false;
 
@@ -141,18 +149,18 @@ export function withTokenRefresh(fetchFunction, {refreshToken}) {
 			If callers need per-attempt upload progress, withUploadProgress must be composed inside withTokenRefresh so both sends go through it.
 			*/
 			const [initialBody, clonedBody] = bodyResolvedOptions.body.tee();
-			initialOptions = {...initialOptions, body: initialBody};
+			requestOptions = {...requestOptions, body: initialBody};
 
 			retryBody = clonedBody;
 			hasRetryBody = true;
 		}
 
-		initialOptions = withSignal(initialOptions, signal);
-		const authorization = fetchFunction[resolveAuthorizationHeaderSymbol]?.(urlOrRequest, initialOptions) ?? requestHeaders.get('Authorization');
+		requestOptions = withSignal(requestOptions, signal);
+		const authorization = requestHeaders.get('Authorization');
 		let response;
 
 		try {
-			response = await fetchFunction(urlOrRequest, initialOptions);
+			response = await fetchFunction(urlOrRequest, requestOptions);
 		} catch (error) {
 			await discardBody(retryBody);
 			throw error;
@@ -193,8 +201,8 @@ export function withTokenRefresh(fetchFunction, {refreshToken}) {
 		// Retry state stays minimal: replace only Authorization and rerun the same request shape once.
 		headers.set('Authorization', `Bearer ${token}`);
 		const retryOptions = hasRetryBody
-			? {...bodyResolvedOptions, body: retryBody, headers}
-			: {...bodyResolvedOptions, headers};
+			? withResolvedRequestHeaders({...bodyResolvedOptions, body: retryBody}, headers)
+			: withResolvedRequestHeaders(bodyResolvedOptions, headers);
 		return fetchFunction(urlOrRequest, withSignal(retryOptions, signal));
 	};
 

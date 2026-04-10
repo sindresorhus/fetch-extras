@@ -4,6 +4,8 @@
 
 Pipes a value through a series of functions, left to right. This is a convenience for composing `with*` functions without deep nesting.
 
+For `with*` wrappers, that left-to-right `pipeline()` order is the canonical documented order throughout this package. The resulting runtime wrapper nesting is the inverse of that order.
+
 ## Parameters
 
 - `value` - The initial value to pipe through.
@@ -28,6 +30,20 @@ const apiFetch = pipeline(
 
 const response = await apiFetch('/users');
 const data = await response.json();
+```
+
+Equivalent nested form:
+
+```js
+const apiFetch = withHttpError(
+	withHeaders(
+		withBaseUrl(
+			withTimeout(fetch, 5000),
+			'https://api.example.com',
+		),
+		{Authorization: 'Bearer token'},
+	),
+);
 ```
 
 Without `pipeline()`, the same composition would need nested `with*` calls.
