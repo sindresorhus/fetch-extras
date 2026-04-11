@@ -17,7 +17,7 @@ try {
 export class HttpError extends Error {
 	readonly name: 'HttpError';
 	readonly code: 'ERR_HTTP_RESPONSE_NOT_OK';
-	response: Response;
+	readonly response: Response;
 
 	/**
 	Constructs a new `HttpError` instance.
@@ -67,18 +67,15 @@ Wraps a fetch function to automatically throw `HttpError` for non-2xx responses.
 
 Can be combined with other `with*` functions.
 
-@param fetchFunction - The fetch function to wrap (usually the global `fetch`).
-@returns A wrapped fetch function that will throw HttpError for non-2xx responses.
+@returns A function that accepts a fetch function and returns a wrapped fetch function that throws `HttpError` for non-2xx responses.
 
 @example
 ```
 import {withHttpError} from 'fetch-extras';
 
-const fetchWithError = withHttpError(fetch);
+const fetchWithError = withHttpError()(fetch);
 const response = await fetchWithError('/api'); // Throws HttpError for non-2xx responses
 const data = await response.json();
 ```
 */
-export function withHttpError<FetchFunction extends typeof fetch>(
-	fetchFunction: FetchFunction
-): (...arguments_: Parameters<FetchFunction>) => ReturnType<FetchFunction>;
+export function withHttpError(): (fetchFunction: typeof fetch) => typeof fetch;

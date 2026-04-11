@@ -15,7 +15,7 @@ const createCapturingFetch = () => {
 
 test('withHeaders - adds default headers when none provided', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, {Authorization: 'Bearer token'});
+	const fetchWithHeaders = withHeaders({Authorization: 'Bearer token'})(mockFetch);
 
 	await fetchWithHeaders('/api');
 
@@ -25,7 +25,7 @@ test('withHeaders - adds default headers when none provided', async t => {
 
 test('withHeaders - call-site headers override defaults for same key', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, {Authorization: 'Bearer default'});
+	const fetchWithHeaders = withHeaders({Authorization: 'Bearer default'})(mockFetch);
 
 	await fetchWithHeaders('/api', {headers: {Authorization: 'Bearer override'}});
 
@@ -35,7 +35,7 @@ test('withHeaders - call-site headers override defaults for same key', async t =
 
 test('withHeaders - call-site and default headers with different keys are merged', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, {Authorization: 'Bearer token'});
+	const fetchWithHeaders = withHeaders({Authorization: 'Bearer token'})(mockFetch);
 
 	await fetchWithHeaders('/api', {headers: {'Content-Type': 'application/json'}});
 
@@ -44,9 +44,22 @@ test('withHeaders - call-site and default headers with different keys are merged
 	t.is(options.headers.get('content-type'), 'application/json');
 });
 
+test('withHeaders - static defaults are snapshotted when creating the wrapper factory', async t => {
+	const mockFetch = createCapturingFetch();
+	const headers = new Headers({authorization: 'Bearer initial'});
+	const addHeaders = withHeaders(headers);
+	headers.set('authorization', 'Bearer mutated');
+	const fetchWithHeaders = addHeaders(mockFetch);
+
+	await fetchWithHeaders('/api');
+
+	const {options} = mockFetch.calls[0];
+	t.is(options.headers.get('authorization'), 'Bearer initial');
+});
+
 test('withHeaders - header name matching is case-insensitive', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, {'Content-Type': 'text/plain'});
+	const fetchWithHeaders = withHeaders({'Content-Type': 'text/plain'})(mockFetch);
 
 	await fetchWithHeaders('/api', {headers: {'content-type': 'application/json'}});
 
@@ -57,7 +70,7 @@ test('withHeaders - header name matching is case-insensitive', async t => {
 
 test('withHeaders - uses Request headers as call-site headers', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, {Authorization: 'Bearer default', 'X-Default': 'yes'});
+	const fetchWithHeaders = withHeaders({Authorization: 'Bearer default', 'X-Default': 'yes'})(mockFetch);
 
 	const request = new Request('https://example.com/api', {headers: {Authorization: 'Bearer from-request'}});
 	await fetchWithHeaders(request);
@@ -69,7 +82,7 @@ test('withHeaders - uses Request headers as call-site headers', async t => {
 
 test('withHeaders - options.headers takes priority over Request headers', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, {Authorization: 'Bearer default'});
+	const fetchWithHeaders = withHeaders({Authorization: 'Bearer default'})(mockFetch);
 
 	const request = new Request('https://example.com/api', {headers: {Authorization: 'Bearer from-request'}});
 	await fetchWithHeaders(request, {headers: {Authorization: 'Bearer from-options'}});
@@ -80,7 +93,7 @@ test('withHeaders - options.headers takes priority over Request headers', async 
 
 test('withHeaders - Request body overrides preserve inherited body headers on the initial request', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, {'X-Default': 'yes'});
+	const fetchWithHeaders = withHeaders({'X-Default': 'yes'})(mockFetch);
 
 	const request = new Request('https://example.com/api', {
 		method: 'POST',
@@ -103,11 +116,11 @@ test('withHeaders - Request body overrides preserve inherited body headers on th
 
 test('withHeaders - Request body overrides preserve inherited Request body headers over defaults on the initial request', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, {
+	const fetchWithHeaders = withHeaders({
 		'Content-Type': 'application/json',
 		'Content-Language': 'fr',
 		'X-Default': 'yes',
-	});
+	})(mockFetch);
 
 	const request = new Request('https://example.com/api', {
 		method: 'POST',
@@ -128,11 +141,11 @@ test('withHeaders - Request body overrides preserve inherited Request body heade
 
 test('withHeaders - Request body overrides preserve explicit per-call body headers on the initial request', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, {
+	const fetchWithHeaders = withHeaders({
 		'Content-Type': 'application/json',
 		'Content-Language': 'fr',
 		'X-Default': 'yes',
-	});
+	})(mockFetch);
 
 	const request = new Request('https://example.com/api', {
 		method: 'POST',
@@ -165,7 +178,7 @@ test('withHeaders - Request body overrides preserve explicit per-call body heade
 
 test('withHeaders - preserves non-conflicting Request headers when options.headers is also provided', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, {});
+	const fetchWithHeaders = withHeaders({})(mockFetch);
 
 	const request = new Request('https://example.com/api', {headers: {'Content-Type': 'application/json', Authorization: 'Bearer from-request'}});
 	await fetchWithHeaders(request, {headers: {'X-Trace': 'abc'}});
@@ -178,7 +191,7 @@ test('withHeaders - preserves non-conflicting Request headers when options.heade
 
 test('withHeaders - URL object is forwarded unchanged with defaults applied', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, {Authorization: 'Bearer token'});
+	const fetchWithHeaders = withHeaders({Authorization: 'Bearer token'})(mockFetch);
 
 	const url = new URL('https://example.com/api');
 	await fetchWithHeaders(url);
@@ -189,7 +202,7 @@ test('withHeaders - URL object is forwarded unchanged with defaults applied', as
 
 test('withHeaders - passes other options through unchanged', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, {});
+	const fetchWithHeaders = withHeaders({})(mockFetch);
 
 	await fetchWithHeaders('/api', {method: 'POST', body: 'data'});
 
@@ -200,7 +213,7 @@ test('withHeaders - passes other options through unchanged', async t => {
 
 test('withHeaders - calls do not share header state', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, {Authorization: 'Bearer token'});
+	const fetchWithHeaders = withHeaders({Authorization: 'Bearer token'})(mockFetch);
 
 	await fetchWithHeaders('/api', {headers: {'X-Extra': 'only-first-call'}});
 	await fetchWithHeaders('/api');
@@ -211,8 +224,8 @@ test('withHeaders - calls do not share header state', async t => {
 
 test('withHeaders - composed wrappers merge all header sets', async t => {
 	const mockFetch = createCapturingFetch();
-	const innerFetch = withHeaders(mockFetch, {'X-Inner': 'inner', Authorization: 'inner-token'});
-	const outerFetch = withHeaders(innerFetch, {'X-Outer': 'outer', Authorization: 'outer-token'});
+	const innerFetch = withHeaders({'X-Inner': 'inner', Authorization: 'inner-token'})(mockFetch);
+	const outerFetch = withHeaders({'X-Outer': 'outer', Authorization: 'outer-token'})(innerFetch);
 
 	await outerFetch('/api', {headers: {'X-Call': 'call'}});
 
@@ -226,8 +239,8 @@ test('withHeaders - composed wrappers merge all header sets', async t => {
 
 test('withHeaders - composed wrappers: call-site headers beat all defaults', async t => {
 	const mockFetch = createCapturingFetch();
-	const innerFetch = withHeaders(mockFetch, {Authorization: 'inner-token'});
-	const outerFetch = withHeaders(innerFetch, {Authorization: 'outer-token'});
+	const innerFetch = withHeaders({Authorization: 'inner-token'})(mockFetch);
+	const outerFetch = withHeaders({Authorization: 'outer-token'})(innerFetch);
 
 	await outerFetch('/api', {headers: {Authorization: 'call-token'}});
 
@@ -237,7 +250,7 @@ test('withHeaders - composed wrappers: call-site headers beat all defaults', asy
 
 test('withHeaders - accepts Headers instance as defaultHeaders', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, new Headers({Authorization: 'Bearer token'}));
+	const fetchWithHeaders = withHeaders(new Headers({Authorization: 'Bearer token'}))(mockFetch);
 
 	await fetchWithHeaders('/api');
 
@@ -247,7 +260,7 @@ test('withHeaders - accepts Headers instance as defaultHeaders', async t => {
 
 test('withHeaders - accepts array of tuples as defaultHeaders', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, [['Authorization', 'Bearer token'], ['X-Custom', 'value']]);
+	const fetchWithHeaders = withHeaders([['Authorization', 'Bearer token'], ['X-Custom', 'value']])(mockFetch);
 
 	await fetchWithHeaders('/api');
 
@@ -258,7 +271,7 @@ test('withHeaders - accepts array of tuples as defaultHeaders', async t => {
 
 test('withHeaders - explicit undefined options falls back to defaults', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, {Authorization: 'Bearer token'});
+	const fetchWithHeaders = withHeaders({Authorization: 'Bearer token'})(mockFetch);
 
 	await fetchWithHeaders('/api', undefined);
 
@@ -268,7 +281,7 @@ test('withHeaders - explicit undefined options falls back to defaults', async t 
 
 test('withHeaders - accepts a sync function that returns headers', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, () => ({Authorization: 'Bearer dynamic-token'}));
+	const fetchWithHeaders = withHeaders(() => ({Authorization: 'Bearer dynamic-token'}))(mockFetch);
 
 	await fetchWithHeaders('/api');
 
@@ -278,7 +291,7 @@ test('withHeaders - accepts a sync function that returns headers', async t => {
 
 test('withHeaders - accepts an async function that returns headers', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, async () => ({Authorization: 'Bearer async-token'}));
+	const fetchWithHeaders = withHeaders(async () => ({Authorization: 'Bearer async-token'}))(mockFetch);
 
 	await fetchWithHeaders('/api');
 
@@ -290,10 +303,10 @@ test('withHeaders - already-aborted requests do not await async default headers'
 	const mockFetch = createCapturingFetch();
 	const abortController = new AbortController();
 	let didCallResolver = false;
-	const fetchWithHeaders = withHeaders(mockFetch, async () => {
+	const fetchWithHeaders = withHeaders(async () => {
 		didCallResolver = true;
 		return {Authorization: 'Bearer async-token'};
-	});
+	})(mockFetch);
 
 	abortController.abort();
 
@@ -310,12 +323,12 @@ test('withHeaders - abort interrupts pending async default headers', async t => 
 	const started = new Promise(resolve => {
 		notifyStarted = resolve;
 	});
-	const fetchWithHeaders = withHeaders(mockFetch, async () => {
+	const fetchWithHeaders = withHeaders(async () => {
 		notifyStarted();
 		return new Promise(resolve => {
 			resolveDefaultHeaders = resolve;
 		});
-	});
+	})(mockFetch);
 
 	const pendingRequest = fetchWithHeaders('/api', {signal: abortController.signal});
 	await started;
@@ -329,10 +342,10 @@ test('withHeaders - abort interrupts pending async default headers', async t => 
 test('withHeaders - function is called on every request', async t => {
 	const mockFetch = createCapturingFetch();
 	let callCount = 0;
-	const fetchWithHeaders = withHeaders(mockFetch, () => {
+	const fetchWithHeaders = withHeaders(() => {
 		callCount++;
 		return {'X-Count': String(callCount)};
-	});
+	})(mockFetch);
 
 	await fetchWithHeaders('/api');
 	await fetchWithHeaders('/api');
@@ -346,10 +359,10 @@ test('withHeaders - function is called on every request', async t => {
 
 test('withHeaders - per-call headers override function-returned defaults', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, () => ({
+	const fetchWithHeaders = withHeaders(() => ({
 		Authorization: 'Bearer default',
 		'X-Default': 'yes',
-	}));
+	}))(mockFetch);
 
 	await fetchWithHeaders('/api', {headers: {Authorization: 'Bearer override'}});
 
@@ -360,7 +373,7 @@ test('withHeaders - per-call headers override function-returned defaults', async
 
 test('withHeaders - function-returned headers merge with Request headers', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, () => ({'X-Default': 'yes'}));
+	const fetchWithHeaders = withHeaders(() => ({'X-Default': 'yes'}))(mockFetch);
 
 	const request = new Request('https://example.com/api', {headers: {Authorization: 'Bearer from-request'}});
 	await fetchWithHeaders(request);
@@ -372,7 +385,7 @@ test('withHeaders - function-returned headers merge with Request headers', async
 
 test('withHeaders - function returning Headers instance', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, () => new Headers({Authorization: 'Bearer from-headers-instance'}));
+	const fetchWithHeaders = withHeaders(() => new Headers({Authorization: 'Bearer from-headers-instance'}))(mockFetch);
 
 	await fetchWithHeaders('/api');
 
@@ -382,7 +395,7 @@ test('withHeaders - function returning Headers instance', async t => {
 
 test('withHeaders - function returning array of tuples', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, () => [['Authorization', 'Bearer from-tuples'], ['X-Custom', 'value']]);
+	const fetchWithHeaders = withHeaders(() => [['Authorization', 'Bearer from-tuples'], ['X-Custom', 'value']])(mockFetch);
 
 	await fetchWithHeaders('/api');
 
@@ -393,8 +406,8 @@ test('withHeaders - function returning array of tuples', async t => {
 
 test('withHeaders - composed wrappers with mixed function and static headers', async t => {
 	const mockFetch = createCapturingFetch();
-	const innerFetch = withHeaders(mockFetch, {'X-Inner': 'inner', Authorization: 'inner-token'});
-	const outerFetch = withHeaders(innerFetch, () => ({'X-Outer': 'outer', Authorization: 'outer-token'}));
+	const innerFetch = withHeaders({'X-Inner': 'inner', Authorization: 'inner-token'})(mockFetch);
+	const outerFetch = withHeaders(() => ({'X-Outer': 'outer', Authorization: 'outer-token'}))(innerFetch);
 
 	await outerFetch('/api', {headers: {'X-Call': 'call'}});
 
@@ -407,7 +420,7 @@ test('withHeaders - composed wrappers with mixed function and static headers', a
 
 test('withHeaders - body-header inheritance with function-based defaults', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, () => ({'X-Default': 'yes'}));
+	const fetchWithHeaders = withHeaders(() => ({'X-Default': 'yes'}))(mockFetch);
 
 	const request = new Request('https://example.com/api', {
 		method: 'POST',
@@ -428,11 +441,11 @@ test('withHeaders - body-header inheritance with function-based defaults', async
 
 test('withHeaders - body-header inheritance with function-based defaults that include body headers', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, () => ({
+	const fetchWithHeaders = withHeaders(() => ({
 		'Content-Type': 'application/json',
 		'Content-Language': 'fr',
 		'X-Default': 'yes',
-	}));
+	}))(mockFetch);
 
 	const request = new Request('https://example.com/api', {
 		method: 'POST',
@@ -454,7 +467,7 @@ test('withHeaders - body-header inheritance with function-based defaults that in
 
 test('withHeaders - function calls do not share header state across requests', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, () => ({Authorization: 'Bearer token'}));
+	const fetchWithHeaders = withHeaders(() => ({Authorization: 'Bearer token'}))(mockFetch);
 
 	await fetchWithHeaders('/api', {headers: {'X-Extra': 'only-first-call'}});
 	await fetchWithHeaders('/api');
@@ -465,7 +478,7 @@ test('withHeaders - function calls do not share header state across requests', a
 
 test('withHeaders - function header name matching is case-insensitive', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, () => ({'Content-Type': 'text/plain'}));
+	const fetchWithHeaders = withHeaders(() => ({'Content-Type': 'text/plain'}))(mockFetch);
 
 	await fetchWithHeaders('/api', {headers: {'content-type': 'application/json'}});
 
@@ -477,7 +490,7 @@ test('withHeaders - function header name matching is case-insensitive', async t 
 test('withHeaders - concurrent requests with function-based headers resolve independently', async t => {
 	const mockFetch = createCapturingFetch();
 	let callCount = 0;
-	const fetchWithHeaders = withHeaders(mockFetch, async () => {
+	const fetchWithHeaders = withHeaders(async () => {
 		callCount++;
 		const current = callCount;
 		// Simulate async delay so requests overlap
@@ -485,7 +498,7 @@ test('withHeaders - concurrent requests with function-based headers resolve inde
 			setTimeout(resolve, 10);
 		});
 		return {'X-Request-Id': String(current)};
-	});
+	})(mockFetch);
 
 	await Promise.all([
 		fetchWithHeaders('/api/1'),
@@ -504,9 +517,9 @@ test('withHeaders - concurrent requests with function-based headers resolve inde
 
 test('withHeaders - sync function that throws propagates error', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, () => {
+	const fetchWithHeaders = withHeaders(() => {
 		throw new Error('header resolution failed');
-	});
+	})(mockFetch);
 
 	await t.throwsAsync(fetchWithHeaders('/api'), {message: 'header resolution failed'});
 	t.is(mockFetch.calls.length, 0);
@@ -514,9 +527,9 @@ test('withHeaders - sync function that throws propagates error', async t => {
 
 test('withHeaders - async function that rejects propagates error', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, async () => {
+	const fetchWithHeaders = withHeaders(async () => {
 		throw new Error('async header resolution failed');
-	});
+	})(mockFetch);
 
 	await t.throwsAsync(fetchWithHeaders('/api'), {message: 'async header resolution failed'});
 	t.is(mockFetch.calls.length, 0);
@@ -524,7 +537,7 @@ test('withHeaders - async function that rejects propagates error', async t => {
 
 test('withHeaders - function returning empty object applies per-call headers', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHeaders = withHeaders(mockFetch, () => ({}));
+	const fetchWithHeaders = withHeaders(() => ({}))(mockFetch);
 
 	await fetchWithHeaders('/api', {headers: {'X-Custom': 'value'}});
 
@@ -536,10 +549,10 @@ test('withHeaders - already-aborted Request.signal does not await async default 
 	const mockFetch = createCapturingFetch();
 	const abortController = new AbortController();
 	let didCallResolver = false;
-	const fetchWithHeaders = withHeaders(mockFetch, async () => {
+	const fetchWithHeaders = withHeaders(async () => {
 		didCallResolver = true;
 		return {Authorization: 'Bearer async-token'};
-	});
+	})(mockFetch);
 
 	abortController.abort();
 	const request = new Request('https://example.com/api', {signal: abortController.signal});

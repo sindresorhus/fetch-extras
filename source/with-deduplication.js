@@ -36,45 +36,48 @@ function shouldDeduplicate(fetchFunction, urlOrRequest, options) {
 	return Object.keys(options).length === 0;
 }
 
-export function withDeduplication(fetchFunction) {
-	const pending = new Map();
+export function withDeduplication() {
+	return fetchFunction => {
+		// In-flight deduplication is per wrapped fetch function, not per curried wrapper factory.
+		const pending = new Map();
 
-	const fetchWithDeduplication = async function (urlOrRequest, options) {
-		const requestOptions = options ?? {};
+		const fetchWithDeduplication = async function (urlOrRequest, options) {
+			const requestOptions = options ?? {};
 
-		if (!shouldDeduplicate(fetchFunction, urlOrRequest, requestOptions)) {
-			return fetchFunction(urlOrRequest, options);
-		}
-
-		const key = resolveDeduplicationKey(fetchFunction, urlOrRequest);
-		const existingEntry = pending.get(key);
-		if (existingEntry) {
-			return enqueueWaiter(existingEntry);
-		}
-
-		const entry = {waiters: []};
-		pending.set(key, entry);
-		const responsePromise = enqueueWaiter(entry);
-
-		try {
-			const response = await fetchFunction(urlOrRequest, requestOptions);
-			const [firstWaiter, ...otherWaiters] = entry.waiters;
-
-			firstWaiter.resolve(response);
-
-			for (const waiter of otherWaiters) {
-				waiter.resolve(response.clone());
+			if (!shouldDeduplicate(fetchFunction, urlOrRequest, requestOptions)) {
+				return fetchFunction(urlOrRequest, options);
 			}
-		} catch (error) {
-			for (const waiter of entry.waiters) {
-				waiter.reject(error);
-			}
-		} finally {
-			pending.delete(key);
-		}
 
-		return responsePromise;
+			const key = resolveDeduplicationKey(fetchFunction, urlOrRequest);
+			const existingEntry = pending.get(key);
+			if (existingEntry) {
+				return enqueueWaiter(existingEntry);
+			}
+
+			const entry = {waiters: []};
+			pending.set(key, entry);
+			const responsePromise = enqueueWaiter(entry);
+
+			try {
+				const response = await fetchFunction(urlOrRequest, requestOptions);
+				const [firstWaiter, ...otherWaiters] = entry.waiters;
+
+				firstWaiter.resolve(response);
+
+				for (const waiter of otherWaiters) {
+					waiter.resolve(response.clone());
+				}
+			} catch (error) {
+				for (const waiter of entry.waiters) {
+					waiter.reject(error);
+				}
+			} finally {
+				pending.delete(key);
+			}
+
+			return responsePromise;
+		};
+
+		return copyFetchMetadata(fetchWithDeduplication, fetchFunction);
 	};
-
-	return copyFetchMetadata(fetchWithDeduplication, fetchFunction);
 }

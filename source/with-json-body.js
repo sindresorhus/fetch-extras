@@ -83,33 +83,34 @@ function shouldJsonifyBody(body) {
 /**
 Returns a wrapped fetch function that automatically stringifies plain-object and array bodies as JSON and sets the `Content-Type: application/json` header.
 
-@param {typeof fetch} fetchFunction - The fetch function to wrap (usually the global `fetch`).
-@returns {typeof fetch} A wrapped fetch function that auto-serializes JSON bodies.
+@returns {(fetchFunction: typeof fetch) => typeof fetch} A function that accepts a fetch function and returns a wrapped fetch function that auto-serializes JSON bodies.
 */
-export function withJsonBody(fetchFunction) {
-	const fetchWithJsonBody = async (urlOrRequest, options = {}) => {
-		if (shouldJsonifyBody(options.body)) {
-			options = await getJsonRequestOptions(fetchFunction, urlOrRequest, options);
-		}
+export function withJsonBody() {
+	return fetchFunction => {
+		const fetchWithJsonBody = async (urlOrRequest, options = {}) => {
+			if (shouldJsonifyBody(options.body)) {
+				options = await getJsonRequestOptions(fetchFunction, urlOrRequest, options);
+			}
 
-		return fetchFunction(urlOrRequest, options);
+			return fetchFunction(urlOrRequest, options);
+		};
+
+		fetchWithJsonBody[resolveRequestHeadersSymbol] = function (urlOrRequest, options = {}) {
+			if (shouldJsonifyBody(options.body)) {
+				return getJsonHeaders(fetchFunction, urlOrRequest, options);
+			}
+
+			return fetchFunction[resolveRequestHeadersSymbol]?.(urlOrRequest, options);
+		};
+
+		fetchWithJsonBody[resolveRequestBodySymbol] = function (urlOrRequest, options = {}) {
+			if (shouldJsonifyBody(options.body)) {
+				return getJsonBody(options);
+			}
+
+			return fetchFunction[resolveRequestBodySymbol]?.(urlOrRequest, options) ?? options.body;
+		};
+
+		return copyFetchMetadata(fetchWithJsonBody, fetchFunction);
 	};
-
-	fetchWithJsonBody[resolveRequestHeadersSymbol] = function (urlOrRequest, options = {}) {
-		if (shouldJsonifyBody(options.body)) {
-			return getJsonHeaders(fetchFunction, urlOrRequest, options);
-		}
-
-		return fetchFunction[resolveRequestHeadersSymbol]?.(urlOrRequest, options);
-	};
-
-	fetchWithJsonBody[resolveRequestBodySymbol] = function (urlOrRequest, options = {}) {
-		if (shouldJsonifyBody(options.body)) {
-			return getJsonBody(options);
-		}
-
-		return fetchFunction[resolveRequestBodySymbol]?.(urlOrRequest, options) ?? options.body;
-	};
-
-	return copyFetchMetadata(fetchWithJsonBody, fetchFunction);
 }

@@ -7,19 +7,18 @@ Abort signals are respected while waiting: if the signal fires before a slot ope
 
 Can be combined with other `with*` functions.
 
-@param fetchFunction - The fetch function to wrap (usually the global `fetch`).
 @param options - Rate limit configuration.
-@returns A wrapped fetch function that enforces the rate limit.
+@returns A wrapper that takes a fetch function and returns a wrapped fetch function that enforces the rate limit.
 
 @example
 ```
 import {withRateLimit} from 'fetch-extras';
 
 // Allow at most 10 requests per second
-const rateLimitedFetch = withRateLimit(fetch, {
+const rateLimitedFetch = withRateLimit({
 	requestsPerInterval: 10,
 	interval: 1000,
-});
+})(fetch);
 
 const response = await rateLimitedFetch('/api/data');
 const data = await response.json();
@@ -31,16 +30,15 @@ import {pipeline, withHttpError, withRateLimit, withBaseUrl} from 'fetch-extras'
 
 const apiFetch = pipeline(
 	fetch,
-	f => withBaseUrl(f, 'https://api.example.com'),
-	f => withRateLimit(f, {requestsPerInterval: 10, interval: 1000}),
-	withHttpError,
+	withBaseUrl('https://api.example.com'),
+	withRateLimit({requestsPerInterval: 10, interval: 1000}),
+	withHttpError(),
 );
 
 const response = await apiFetch('/users');
 ```
 */
 export function withRateLimit(
-	fetchFunction: typeof fetch,
 	options: {
 		/**
 		Maximum number of requests allowed within the interval.
@@ -52,4 +50,4 @@ export function withRateLimit(
 		*/
 		interval: number;
 	},
-): typeof fetch;
+): (fetchFunction: typeof fetch) => typeof fetch;

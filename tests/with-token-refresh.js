@@ -77,9 +77,7 @@ const createAuthorization401Fetch = () => {
 	return {mockFetch, getCallCount: () => callCount};
 };
 
-const createFunctionDefaultTokenRefresh = (mockFetch, defaultAuthorization, onRefresh) => withTokenRefresh(withHeaders(mockFetch, async () => ({
-	Authorization: defaultAuthorization,
-})), {
+const createFunctionDefaultTokenRefresh = (mockFetch, defaultAuthorization, onRefresh) => withTokenRefresh({
 	async refreshToken() {
 		onRefresh();
 		await new Promise(resolve => {
@@ -87,7 +85,9 @@ const createFunctionDefaultTokenRefresh = (mockFetch, defaultAuthorization, onRe
 		});
 		return 'new-token';
 	},
-});
+})(withHeaders(async () => ({
+	Authorization: defaultAuthorization,
+}))(mockFetch));
 
 const getAuthorizationHeader = (urlOrRequest, options = {}) => urlOrRequest instanceof Request
 	? new Request(urlOrRequest, options).headers.get('Authorization')
@@ -97,12 +97,12 @@ test('passes through non-401 responses without refreshing', async t => {
 	const {mockFetch, getCallCount} = createMockFetch({initialStatus: 200});
 	let refreshCalled = false;
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCalled = true;
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRefresh('/api/users');
 	t.is(response.status, 200);
@@ -113,11 +113,11 @@ test('passes through non-401 responses without refreshing', async t => {
 test('refreshes token and retries on 401', async t => {
 	const {mockFetch, getCallCount} = createMockFetch({initialStatus: 401, retryStatus: 200});
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRefresh('/api/users');
 	t.is(response.status, 200);
@@ -148,11 +148,11 @@ test('cancels the discarded 401 response body before retrying', async t => {
 		});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRefresh('/api/users');
 	t.is(response.status, 200);
@@ -163,18 +163,18 @@ test('cancels the original 401 response body when refresh wait is aborted', asyn
 	let canceled401Body = false;
 	const controller = new AbortController();
 
-	const fetchWithRefresh = withTokenRefresh(async () => new Response(new ReadableStream({
-		cancel() {
-			canceled401Body = true;
-		},
-	}), {status: 401}), {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			await new Promise(resolve => {
 				setTimeout(resolve, 50);
 			});
 			return 'new-token';
 		},
-	});
+	})(async () => new Response(new ReadableStream({
+		cancel() {
+			canceled401Body = true;
+		},
+	}), {status: 401}));
 
 	const promise = fetchWithRefresh('https://example.com/api', {signal: controller.signal});
 	controller.abort(new DOMException('Aborted during refresh', 'AbortError'));
@@ -190,11 +190,11 @@ test('cancels the original 401 response body when refresh wait is aborted', asyn
 test('returns original 401 response when refreshToken throws', async t => {
 	const {mockFetch, getCallCount} = createMockFetch({initialStatus: 401});
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			throw new Error('Refresh failed');
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRefresh('/api/users');
 	t.is(response.status, 401);
@@ -204,11 +204,11 @@ test('returns original 401 response when refreshToken throws', async t => {
 test('only retries once even if retry returns 401', async t => {
 	const {mockFetch, getCallCount} = createMockFetch({initialStatus: 401, retryStatus: 401});
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRefresh('/api/users');
 	t.is(response.status, 401);
@@ -230,7 +230,7 @@ test('refreshes successfully after a prior refresh failure', async t => {
 		};
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			if (refreshCount === 1) {
@@ -239,7 +239,7 @@ test('refreshes successfully after a prior refresh failure', async t => {
 
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const response1 = await fetchWithRefresh('/api/a');
 	t.is(response1.status, 401);
@@ -266,7 +266,7 @@ test('deduplicates concurrent refresh calls', async t => {
 		};
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			await new Promise(resolve => {
@@ -274,7 +274,7 @@ test('deduplicates concurrent refresh calls', async t => {
 			});
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const [response1, response2, response3] = await Promise.all([
 		fetchWithRefresh('/api/a'),
@@ -287,6 +287,35 @@ test('deduplicates concurrent refresh calls', async t => {
 	t.is(response3.status, 200);
 	t.is(refreshCount, 1);
 	t.is(callCount, 6);
+});
+
+test('reused token-refresh wrapper deduplicates refresh across wrapped fetch functions', async t => {
+	let refreshCount = 0;
+	const {mockFetch} = createAuthorization401Fetch();
+	const refresh = withTokenRefresh({
+		async refreshToken() {
+			refreshCount++;
+			await new Promise(resolve => {
+				setTimeout(resolve, 50);
+			});
+			return 'new-token';
+		},
+	});
+	const fetchWithRefreshA = refresh(withHeaders({
+		Authorization: 'Bearer token',
+	})(mockFetch));
+	const fetchWithRefreshB = refresh(withHeaders({
+		Authorization: 'Bearer token',
+	})(mockFetch));
+
+	const [responseA, responseB] = await Promise.all([
+		fetchWithRefreshA('/api/a'),
+		fetchWithRefreshB('/api/b'),
+	]);
+
+	t.is(responseA.status, 200);
+	t.is(responseB.status, 200);
+	t.is(refreshCount, 1);
 });
 
 test('retries Request input and preserves its headers', async t => {
@@ -310,11 +339,11 @@ test('retries Request input and preserves its headers', async t => {
 		};
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const request = new Request('https://example.com/api/users', {
 		method: 'GET',
@@ -337,11 +366,11 @@ test('Request input merges Request headers into the initial attempt when options
 		return new Response(null, {status: 200});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const request = new Request('https://example.com/api/users', {
 		headers: {
@@ -376,11 +405,11 @@ test('successful Request input does not clone the request body', async t => {
 
 	const mockFetch = async () => new Response(null, {status: 200});
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const request = new TrackingRequest('https://example.com/api/users', {
 		method: 'POST',
@@ -396,12 +425,12 @@ test('passes through non-401 error responses without refreshing', async t => {
 	const {mockFetch, getCallCount} = createMockFetch({initialStatus: 500});
 	let refreshCalled = false;
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCalled = true;
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRefresh('/api/users');
 	t.is(response.status, 500);
@@ -426,12 +455,12 @@ test('handles successive 401s with separate refresh calls', async t => {
 		};
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			return `token-${refreshCount}`;
 		},
-	});
+	})(mockFetch);
 
 	const response1 = await fetchWithRefresh('/api/a');
 	t.is(response1.status, 200);
@@ -463,11 +492,11 @@ test('options.headers override Request headers on retry', async t => {
 		};
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const request = new Request('https://example.com/api', {
 		headers: {Accept: 'text/html', 'X-From-Request': 'yes'},
@@ -504,11 +533,11 @@ test('replaces existing Authorization header on retry', async t => {
 		};
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	await fetchWithRefresh('/api/users', {
 		headers: {Authorization: 'Bearer expired-token', 'X-Custom': 'value'},
@@ -528,11 +557,11 @@ test('does not mutate plain-object options.headers when retrying', async t => {
 		status: new Headers(options.headers).get('Authorization') === 'Bearer new-token' ? 200 : 401,
 	});
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRefresh('/api/users', {
 		headers: originalHeaders,
@@ -555,11 +584,11 @@ test('does not mutate Headers instance in options.headers when retrying', async 
 		status: new Headers(options.headers).get('Authorization') === 'Bearer new-token' ? 200 : 401,
 	});
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRefresh('/api/users', {
 		headers: originalHeaders,
@@ -590,11 +619,11 @@ test('preserves other fetch options on retry', async t => {
 		};
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	await fetchWithRefresh('/api/users', {
 		method: 'POST',
@@ -611,12 +640,12 @@ test('preserves other fetch options on retry', async t => {
 test('composes with withHttpError - no throw when refresh succeeds', async t => {
 	const {mockFetch} = createMockFetch({initialStatus: 401, retryStatus: 200});
 
-	const fetchWithRefresh = withHttpError(
-		withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withHttpError()(
+		withTokenRefresh({
 			async refreshToken() {
 				return 'new-token';
 			},
-		}),
+		})(mockFetch),
 	);
 
 	const response = await fetchWithRefresh('/api/users');
@@ -626,12 +655,12 @@ test('composes with withHttpError - no throw when refresh succeeds', async t => 
 test('composes with withHttpError - throws when refresh also fails', async t => {
 	const {mockFetch} = createMockFetch({initialStatus: 401, retryStatus: 401});
 
-	const fetchWithRefresh = withHttpError(
-		withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withHttpError()(
+		withTokenRefresh({
 			async refreshToken() {
 				return 'new-token';
 			},
-		}),
+		})(mockFetch),
 	);
 
 	const error = await t.throwsAsync(fetchWithRefresh('/api/users'), {instanceOf: HttpError});
@@ -656,12 +685,12 @@ test('Request body without override returns the original 401 response', async t 
 		return new Response(null, {status: 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCalled = true;
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const request = new Request('https://example.com/api', {
 		method: 'POST',
@@ -690,11 +719,11 @@ test('retries streamed options body without consuming it twice', async t => {
 		return new Response(null, {status});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const stream = new ReadableStream({
 		start(controller) {
@@ -726,11 +755,11 @@ test('retries streamed override body for Request input without consuming it twic
 		return new Response(null, {status});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const stream = new ReadableStream({
 		start(controller) {
@@ -769,11 +798,11 @@ test('does not retry AsyncIterable options body', async t => {
 		return new Response(null, {status: 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRefresh('https://example.com/api', {
 		method: 'POST',
@@ -799,11 +828,11 @@ test('Request body overrides preserve inherited body headers on the first attemp
 		},
 	});
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const request = createBodyOverrideRequest({
 		'content-type': 'text/plain;charset=UTF-8',
@@ -835,11 +864,11 @@ test('Request body overrides preserve explicit Request body headers on retry', a
 		},
 	});
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const formData = createFormDataBody();
 	const request = createBodyOverrideRequest({
@@ -867,11 +896,11 @@ test('Request body overrides preserve explicit replacement body headers and non-
 		},
 	});
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const request = createBodyOverrideRequest({
 		'content-type': 'text/plain;charset=UTF-8',
@@ -910,11 +939,11 @@ test('Request body overrides preserve explicit Request body headers on retry whe
 		},
 	});
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const request = createBodyOverrideRequest({
 		'content-type': 'application/json',
@@ -952,16 +981,16 @@ test('Request body overrides preserve outer withHeaders body defaults across eve
 		},
 	});
 
-	const fetchWithRefresh = withHeaders(withTokenRefresh(mockFetch, {
-		async refreshToken() {
-			return 'new-token';
-		},
-	}), {
+	const fetchWithRefresh = withHeaders({
 		'content-type': 'application/default',
 		'content-language': 'fr',
 		'content-length': '123',
 		'x-default': 'yes',
-	});
+	})(withTokenRefresh({
+		async refreshToken() {
+			return 'new-token';
+		},
+	})(mockFetch));
 	const request = createBodyOverrideRequest(undefined, new Uint8Array([1, 2, 3]));
 
 	const response = await fetchWithRefresh(request, {
@@ -990,16 +1019,16 @@ test('Request body overrides preserve explicit replacement body headers over out
 		},
 	});
 
-	const fetchWithRefresh = withHeaders(withTokenRefresh(mockFetch, {
-		async refreshToken() {
-			return 'new-token';
-		},
-	}), {
+	const fetchWithRefresh = withHeaders({
 		'content-type': 'application/default',
 		'content-language': 'fr',
 		'content-length': '123',
 		'x-default': 'yes',
-	});
+	})(withTokenRefresh({
+		async refreshToken() {
+			return 'new-token';
+		},
+	})(mockFetch));
 	const request = createBodyOverrideRequest(undefined, new Uint8Array([1, 2, 3]));
 
 	const response = await fetchWithRefresh(request, {
@@ -1035,21 +1064,21 @@ test('Request body overrides preserve explicit replacement body headers over nes
 		},
 	});
 
-	const fetchWithRefresh = withHeaders(withHeaders(withTokenRefresh(mockFetch, {
-		async refreshToken() {
-			return 'new-token';
-		},
-	}), {
-		'Content-Type': 'application/inner-default',
-		'Content-Language': 'nb',
-		'Content-Length': '321',
-		'X-Inner-Default': 'yes',
-	}), {
+	const fetchWithRefresh = withHeaders({
 		'content-type': 'application/outer-default',
 		'content-language': 'fr',
 		'content-length': '123',
 		'x-outer-default': 'yes',
-	});
+	})(withHeaders({
+		'Content-Type': 'application/inner-default',
+		'Content-Language': 'nb',
+		'Content-Length': '321',
+		'X-Inner-Default': 'yes',
+	})(withTokenRefresh({
+		async refreshToken() {
+			return 'new-token';
+		},
+	})(mockFetch)));
 	const request = createBodyOverrideRequest(undefined, new Uint8Array([1, 2, 3]));
 
 	const response = await fetchWithRefresh(request, {
@@ -1086,15 +1115,15 @@ test('Request body overrides preserve explicit Request body headers across retry
 		},
 	});
 
-	const fetchWithRefresh = withHeaders(withHeaders(withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withHeaders({
+		'x-outer-default': 'yes',
+	})(withHeaders({
+		'x-inner-default': 'yes',
+	})(withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	}), {
-		'x-inner-default': 'yes',
-	}), {
-		'x-outer-default': 'yes',
-	});
+	})(mockFetch)));
 	const formData = createFormDataBody();
 	const request = createBodyOverrideRequest({
 		'content-type': 'text/plain;charset=UTF-8',
@@ -1125,8 +1154,8 @@ test('withJsonBody Request body overrides replace inherited body headers across 
 
 	const fetchWithRefresh = pipeline(
 		mockFetch,
-		withJsonBody,
-		f => withTokenRefresh(f, {
+		withJsonBody(),
+		withTokenRefresh({
 			async refreshToken() {
 				return 'new-token';
 			},
@@ -1155,8 +1184,8 @@ test('withJsonBody Request body overrides drop Blob-derived Content-Type across 
 
 	const fetchWithRefresh = pipeline(
 		mockFetch,
-		withJsonBody,
-		f => withTokenRefresh(f, {
+		withJsonBody(),
+		withTokenRefresh({
 			async refreshToken() {
 				return 'new-token';
 			},
@@ -1183,9 +1212,9 @@ test('withJsonBody Request body overrides preserve withHeaders Content-Type defa
 
 	const fetchWithRefresh = pipeline(
 		mockFetch,
-		f => withHeaders(f, {'content-type': 'application/vnd.api+json'}),
-		withJsonBody,
-		f => withTokenRefresh(f, {
+		withHeaders({'content-type': 'application/vnd.api+json'}),
+		withJsonBody(),
+		withTokenRefresh({
 			async refreshToken() {
 				return 'new-token';
 			},
@@ -1215,8 +1244,8 @@ test('withJsonBody Request body overrides preserve explicit per-call Content-Typ
 
 	const fetchWithRefresh = pipeline(
 		mockFetch,
-		withJsonBody,
-		f => withTokenRefresh(f, {
+		withJsonBody(),
+		withTokenRefresh({
 			async refreshToken() {
 				return 'new-token';
 			},
@@ -1248,9 +1277,9 @@ test('withJsonBody Request body overrides preserve explicit per-call Content-Typ
 
 	const fetchWithRefresh = pipeline(
 		mockFetch,
-		f => withHeaders(f, {'content-type': 'application/vnd.api+json'}),
-		withJsonBody,
-		f => withTokenRefresh(f, {
+		withHeaders({'content-type': 'application/vnd.api+json'}),
+		withJsonBody(),
+		withTokenRefresh({
 			async refreshToken() {
 				return 'new-token';
 			},
@@ -1280,8 +1309,8 @@ test('withJsonBody Request body overrides preserve explicit Headers Content-Type
 
 	const fetchWithRefresh = pipeline(
 		mockFetch,
-		withJsonBody,
-		f => withTokenRefresh(f, {
+		withJsonBody(),
+		withTokenRefresh({
 			async refreshToken() {
 				return 'new-token';
 			},
@@ -1312,8 +1341,8 @@ test('withJsonBody Request body overrides preserve tuple Content-Type across ref
 
 	const fetchWithRefresh = pipeline(
 		mockFetch,
-		withJsonBody,
-		f => withTokenRefresh(f, {
+		withJsonBody(),
+		withTokenRefresh({
 			async refreshToken() {
 				return 'new-token';
 			},
@@ -1347,8 +1376,8 @@ test('withJsonBody URL inputs preserve JSON Content-Type on the first refresh at
 
 	const fetchWithRefresh = pipeline(
 		mockFetch,
-		withJsonBody,
-		f => withTokenRefresh(f, {
+		withJsonBody(),
+		withTokenRefresh({
 			async refreshToken() {
 				return 'new-token';
 			},
@@ -1380,11 +1409,11 @@ test('custom resolved request bodies are replayed once across refresh retries', 
 		return `${options.body}:${resolveCount}`;
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRefresh('https://example.com', {
 		method: 'POST',
@@ -1419,11 +1448,11 @@ test('custom resolved request bodies are replayed once across refresh retries fo
 		return `${options.body}:${resolveCount}`;
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 	const request = new Request('https://example.com', {
 		method: 'POST',
 		body: 'original',
@@ -1466,11 +1495,11 @@ test('custom resolved Request body overrides preserve merged headers across refr
 		return `${options.body}:${resolveCount}`;
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 	const request = new Request('https://example.com', {
 		method: 'POST',
 		body: 'original',
@@ -1520,11 +1549,11 @@ test('cancels the unused tee branch when no retry happens', async t => {
 		},
 	];
 
-	const fetchWithRefresh = withTokenRefresh(async () => new Response(null, {status: 200}), {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(async () => new Response(null, {status: 200}));
 
 	const response = await fetchWithRefresh('https://example.com/api', {
 		method: 'POST',
@@ -1555,12 +1584,12 @@ test('cancels the unused tee branch when the first fetch throws', async t => {
 		},
 	];
 
-	const fetchWithRefresh = withTokenRefresh(async () => {
-		throw new TypeError('Failed to fetch');
-	}, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
+	})(async () => {
+		throw new TypeError('Failed to fetch');
 	});
 
 	await t.throwsAsync(fetchWithRefresh('https://example.com/api', {
@@ -1595,11 +1624,11 @@ test('retries FormData body with matching multipart boundary', async t => {
 		return Response.json({success: headerBoundary === bodyBoundary});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const formData = new FormData();
 	formData.append('field', 'value');
@@ -1632,14 +1661,14 @@ test('concurrent refresh failure returns 401 for all callers', async t => {
 		};
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			await new Promise(resolve => {
 				setTimeout(resolve, 50);
 			});
 			throw new Error('Refresh failed');
 		},
-	});
+	})(mockFetch);
 
 	const [response1, response2, response3] = await Promise.all([
 		fetchWithRefresh('/api/a'),
@@ -1661,7 +1690,7 @@ test('anonymous refresh failure resets before the next batch', async t => {
 		return new Response(null, {status: isRetry ? 200 : 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			if (refreshCount === 1) {
@@ -1670,7 +1699,7 @@ test('anonymous refresh failure resets before the next batch', async t => {
 
 			return 'recovered-token';
 		},
-	});
+	})(mockFetch);
 
 	const [responseA, responseB] = await Promise.all([
 		fetchWithRefresh('/api/a'),
@@ -1696,7 +1725,7 @@ test('concurrent 401s with different Authorization headers refresh separately', 
 		return new Response(null, {status: isRetry ? 200 : 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			await new Promise(resolve => {
@@ -1704,7 +1733,7 @@ test('concurrent 401s with different Authorization headers refresh separately', 
 			});
 			return `token-${refreshCount}`;
 		},
-	});
+	})(mockFetch);
 
 	const [responseA, responseB] = await Promise.all([
 		fetchWithRefresh('/api/a', {
@@ -1735,7 +1764,7 @@ test('concurrent 401s with different Request Authorization headers refresh separ
 		return new Response(null, {status: isRetry ? 200 : 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			await new Promise(resolve => {
@@ -1743,7 +1772,7 @@ test('concurrent 401s with different Request Authorization headers refresh separ
 			});
 			return `token-${refreshCount}`;
 		},
-	});
+	})(mockFetch);
 
 	const requestA = new Request('https://example.com/api/a', {
 		headers: {
@@ -1784,7 +1813,7 @@ test('anonymous and Authorization-scoped requests start separate refreshes when 
 		throw new Error(`Unexpected URL: ${url}`);
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 
@@ -1794,7 +1823,7 @@ test('anonymous and Authorization-scoped requests start separate refreshes when 
 
 			return 'authorized-token';
 		},
-	});
+	})(mockFetch);
 
 	const anonymousResponsePromise = fetchWithRefresh('/api/anonymous');
 	const authorizedResponsePromise = new Promise(resolve => {
@@ -1833,12 +1862,12 @@ test('successful anonymous refresh resets before the next batch', async t => {
 		return new Response(null, {status: 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			return `token-${refreshCount}`;
 		},
-	});
+	})(mockFetch);
 
 	const [responseA, responseB] = await Promise.all([
 		fetchWithRefresh('/api/a'),
@@ -1878,7 +1907,7 @@ test('late anonymous 401s after refresh settlement start a new refresh', async t
 		return new Response(null, {status: 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			await new Promise(resolve => {
@@ -1886,7 +1915,7 @@ test('late anonymous 401s after refresh settlement start a new refresh', async t
 			});
 			return `token-${refreshCount}`;
 		},
-	});
+	})(mockFetch);
 
 	const [responseA, responseB, responseC] = await Promise.all([
 		fetchWithRefresh('/api/a'),
@@ -1925,12 +1954,12 @@ test('successful in-flight requests do not keep a settled refresh alive', async 
 		return new Response(null, {status: 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			return `token-${refreshCount}`;
 		},
-	});
+	})(mockFetch);
 
 	const slowResponsePromise = fetchWithRefresh('/api/slow-success', {
 		headers: {
@@ -1983,7 +2012,7 @@ test('requests that start mid-refresh reuse the in-flight refresh', async t => {
 		return new Response(null, {status: 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			await new Promise(resolve => {
@@ -1991,7 +2020,7 @@ test('requests that start mid-refresh reuse the in-flight refresh', async t => {
 			});
 			return `token-${refreshCount}`;
 		},
-	});
+	})(mockFetch);
 
 	const firstResponsePromise = fetchWithRefresh('/api/a', {
 		headers: {
@@ -2038,7 +2067,7 @@ test('concurrent anonymous requests still deduplicate while an Authorization ref
 		return new Response(null, {status: 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			await new Promise(resolve => {
@@ -2051,7 +2080,7 @@ test('concurrent anonymous requests still deduplicate while an Authorization ref
 
 			return 'authorized-token';
 		},
-	});
+	})(mockFetch);
 
 	const [anonymousResponse, secondAnonymousResponse, authorizedResponse] = await Promise.all([
 		fetchWithRefresh('/api/anonymous'),
@@ -2086,7 +2115,7 @@ test('anonymous requests do not share refreshes with overlapping Request Authori
 		return new Response(null, {status: 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			await new Promise(resolve => {
@@ -2099,7 +2128,7 @@ test('anonymous requests do not share refreshes with overlapping Request Authori
 
 			return 'authorized-token';
 		},
-	});
+	})(mockFetch);
 
 	const authorizedRequest = new Request('https://example.com/api/authorized', {
 		headers: {
@@ -2134,7 +2163,7 @@ test('anonymous string and Request inputs share the same anonymous refresh', asy
 		return new Response(null, {status: 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			await new Promise(resolve => {
@@ -2142,7 +2171,7 @@ test('anonymous string and Request inputs share the same anonymous refresh', asy
 			});
 			return 'anonymous-token-1';
 		},
-	});
+	})(mockFetch);
 
 	const anonymousRequest = new Request('https://example.com/api/anonymous-request');
 	const [stringResponse, requestResponse] = await Promise.all([
@@ -2173,7 +2202,7 @@ test('anonymous requests do not share refreshes with overlapping per-call Author
 		return new Response(null, {status: 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			await new Promise(resolve => {
@@ -2186,7 +2215,7 @@ test('anonymous requests do not share refreshes with overlapping per-call Author
 
 			return 'authorized-token';
 		},
-	});
+	})(mockFetch);
 
 	const [anonymousResponseA, anonymousResponseB, authorizedResponse] = await Promise.all([
 		fetchWithRefresh('/api/anonymous-a'),
@@ -2221,9 +2250,7 @@ test('anonymous requests do not share refreshes with overlapping function-based 
 		return new Response(null, {status: 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(withHeaders(mockFetch, async () => ({
-		Authorization: 'Bearer expired-token',
-	})), {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			await new Promise(resolve => {
@@ -2236,12 +2263,14 @@ test('anonymous requests do not share refreshes with overlapping function-based 
 
 			return 'anonymous-token-1';
 		},
-	});
+	})(withHeaders(async () => ({
+		Authorization: 'Bearer expired-token',
+	}))(mockFetch));
 
 	const [authorizedResponseA, authorizedResponseB, anonymousResponse] = await Promise.all([
 		fetchWithRefresh('/api/authorized-a'),
 		fetchWithRefresh('/api/authorized-b'),
-		withTokenRefresh(mockFetch, {
+		withTokenRefresh({
 			async refreshToken() {
 				refreshCount++;
 				await new Promise(resolve => {
@@ -2249,7 +2278,7 @@ test('anonymous requests do not share refreshes with overlapping function-based 
 				});
 				return 'anonymous-token-1';
 			},
-		})('/api/anonymous'),
+		})(mockFetch)('/api/anonymous'),
 	]);
 
 	t.is(authorizedResponseA.status, 200);
@@ -2267,7 +2296,7 @@ test('aborting during refresh rejects instead of returning the original 401 resp
 
 	const mockFetch = async () => new Response(null, {status: 401});
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			markRefreshStarted();
 			await new Promise((resolve, reject) => {
@@ -2280,7 +2309,7 @@ test('aborting during refresh rejects instead of returning the original 401 resp
 
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const responsePromise = fetchWithRefresh('/api/users', {
 		signal: abortController.signal,
@@ -2303,7 +2332,7 @@ test('aborting during refresh preserves a custom abort reason', async t => {
 
 	const mockFetch = async () => new Response(null, {status: 401});
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			markRefreshStarted();
 			await new Promise((resolve, reject) => {
@@ -2316,7 +2345,7 @@ test('aborting during refresh preserves a custom abort reason', async t => {
 
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const responsePromise = fetchWithRefresh('/api/users', {
 		signal: abortController.signal,
@@ -2333,7 +2362,7 @@ test('aborting during refresh preserves a custom abort reason', async t => {
 test('withTimeout outside withTokenRefresh rejects on refresh timeout', async t => {
 	const mockFetch = async () => new Response(null, {status: 401});
 
-	const fetchWithRefresh = withTimeout(withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTimeout(50)(withTokenRefresh({
 		async refreshToken() {
 			await new Promise(resolve => {
 				setTimeout(resolve, 100);
@@ -2341,7 +2370,7 @@ test('withTimeout outside withTokenRefresh rejects on refresh timeout', async t 
 
 			return 'new-token';
 		},
-	}), 50);
+	})(mockFetch));
 
 	const error = await t.throwsAsync(fetchWithRefresh('/api/users'));
 	t.is(error.name, 'TimeoutError');
@@ -2355,11 +2384,7 @@ test('withHooks outside withTokenRefresh does not make Request bodies replayable
 		return new Response(null, {status: 401});
 	};
 
-	const fetchWithRefresh = withHooks(withTokenRefresh(mockFetch, {
-		async refreshToken() {
-			return 'new-token';
-		},
-	}), {
+	const fetchWithRefresh = withHooks({
 		beforeRequest({options}) {
 			return {
 				...options,
@@ -2369,7 +2394,11 @@ test('withHooks outside withTokenRefresh does not make Request bodies replayable
 				},
 			};
 		},
-	});
+	})(withTokenRefresh({
+		async refreshToken() {
+			return 'new-token';
+		},
+	})(mockFetch));
 
 	const request = new Request('https://example.com/api', {
 		method: 'POST',
@@ -2390,7 +2419,7 @@ test('withHooks outside withTokenRefresh does not make Request bodies replayable
 test('withTimeout inside withTokenRefresh applies to the refresh wait', async t => {
 	const mockFetch = async () => new Response(null, {status: 401});
 
-	const fetchWithRefresh = withTokenRefresh(withTimeout(mockFetch, 50), {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			await new Promise(resolve => {
 				setTimeout(resolve, 100);
@@ -2398,7 +2427,7 @@ test('withTimeout inside withTokenRefresh applies to the refresh wait', async t 
 
 			return 'new-token';
 		},
-	});
+	})(withTimeout(50)(mockFetch));
 
 	const error = await t.throwsAsync(fetchWithRefresh('/api/users'));
 	t.is(error.name, 'TimeoutError');
@@ -2407,23 +2436,20 @@ test('withTimeout inside withTokenRefresh applies to the refresh wait', async t 
 test('withTimeout inside composed wrappers still applies to the refresh wait', async t => {
 	const mockFetch = async () => new Response(null, {status: 401});
 
-	const fetchWithRefresh = withTokenRefresh(
-		withHeaders(
-			withBaseUrl(
-				withTimeout(mockFetch, 50),
-				'https://example.com',
-			),
-			{'x-test': '1'},
-		),
-		{
-			async refreshToken() {
-				await new Promise(resolve => {
-					setTimeout(resolve, 100);
-				});
+	const fetchWithRefresh = withTokenRefresh({
+		async refreshToken() {
+			await new Promise(resolve => {
+				setTimeout(resolve, 100);
+			});
 
-				return 'new-token';
-			},
+			return 'new-token';
 		},
+	})(
+		withHeaders({'x-test': '1'})(
+			withBaseUrl('https://example.com')(
+				withTimeout(50)(mockFetch),
+			),
+		),
 	);
 
 	const error = await t.throwsAsync(fetchWithRefresh('/api/users'));
@@ -2432,16 +2458,16 @@ test('withTimeout inside composed wrappers still applies to the refresh wait', a
 
 test('withTimeout applies while token refresh pre-resolves async headers', async t => {
 	let callCount = 0;
-	const fetchWithRefresh = withTokenRefresh(withTimeout(withHeaders(async () => {
-		callCount++;
-		return new Response(null, {status: 200});
-	}, async () => new Promise(resolve => {
-		setTimeout(resolve, 100, {'x-test': '1'});
-	})), 10), {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(withTimeout(10)(withHeaders(async () => new Promise(resolve => {
+		setTimeout(resolve, 100, {'x-test': '1'});
+	}))(async () => {
+		callCount++;
+		return new Response(null, {status: 200});
+	})));
 
 	const error = await t.throwsAsync(fetchWithRefresh('/api/users'));
 
@@ -2463,15 +2489,15 @@ test('withUploadProgress inside withTokenRefresh reports both streamed upload at
 		});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(withUploadProgress(mockFetch, {
-		onProgress(progress) {
-			progressEvents.push(progress);
-		},
-	}), {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(withUploadProgress({
+		onProgress(progress) {
+			progressEvents.push(progress);
+		},
+	})(mockFetch));
 
 	const response = await fetchWithRefresh('/api/users', {
 		method: 'POST',
@@ -2498,15 +2524,15 @@ test('withUploadProgress outside withTokenRefresh only reports the initial strea
 		});
 	};
 
-	const fetchWithRefresh = withUploadProgress(withTokenRefresh(mockFetch, {
-		async refreshToken() {
-			return 'new-token';
-		},
-	}), {
+	const fetchWithRefresh = withUploadProgress({
 		onProgress(progress) {
 			progressEvents.push(progress);
 		},
-	});
+	})(withTokenRefresh({
+		async refreshToken() {
+			return 'new-token';
+		},
+	})(mockFetch));
 
 	const response = await fetchWithRefresh('/api/users', {
 		method: 'POST',
@@ -2539,12 +2565,12 @@ test('anonymous retry fetch error resets before the next batch', async t => {
 		return new Response(null, {status: 200});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			return `token-${refreshCount}`;
 		},
-	});
+	})(mockFetch);
 
 	await t.throwsAsync(fetchWithRefresh('/api/a'), {
 		instanceOf: TypeError,
@@ -2580,7 +2606,7 @@ test('late 401s for the same Authorization header start a new refresh after sett
 		return new Response(null, {status: 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			await new Promise(resolve => {
@@ -2588,7 +2614,7 @@ test('late 401s for the same Authorization header start a new refresh after sett
 			});
 			return `token-${refreshCount}`;
 		},
-	});
+	})(mockFetch);
 
 	const requestOptions = {
 		headers: {
@@ -2632,7 +2658,7 @@ test('deduplicates mixed-case Authorization header names', async t => {
 		return new Response(null, {status: 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			await new Promise(resolve => {
@@ -2640,7 +2666,7 @@ test('deduplicates mixed-case Authorization header names', async t => {
 			});
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const [responseA, responseB, responseC] = await Promise.all([
 		fetchWithRefresh('/api/a', {
@@ -2689,9 +2715,7 @@ test('deduplicates by the effective Authorization header from inner withHeaders 
 		return new Response(null, {status: 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(withHeaders(mockFetch, {
-		Authorization: 'Bearer expired-token',
-	}), {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			await new Promise(resolve => {
@@ -2699,7 +2723,9 @@ test('deduplicates by the effective Authorization header from inner withHeaders 
 			});
 			return 'new-token';
 		},
-	});
+	})(withHeaders({
+		Authorization: 'Bearer expired-token',
+	})(mockFetch));
 
 	const [responseA, responseB] = await Promise.all([
 		fetchWithRefresh('/api/a'),
@@ -2728,9 +2754,7 @@ test('per-call Authorization overrides split refreshes from inner static Authori
 		return new Response(null, {status: isRetry ? 200 : 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(withHeaders(mockFetch, {
-		Authorization: 'Bearer default-token',
-	}), {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			await new Promise(resolve => {
@@ -2738,7 +2762,9 @@ test('per-call Authorization overrides split refreshes from inner static Authori
 			});
 			return `refreshed-${refreshCount}`;
 		},
-	});
+	})(withHeaders({
+		Authorization: 'Bearer default-token',
+	})(mockFetch));
 
 	const [responseA, responseB, responseC] = await Promise.all([
 		fetchWithRefresh('/api/a'),
@@ -2773,9 +2799,7 @@ test('Request input shares refreshes by effective Authorization header through i
 		return new Response(null, {status: 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(withHeaders(mockFetch, {
-		Authorization: 'Bearer expired-token',
-	}), {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			await new Promise(resolve => {
@@ -2783,7 +2807,9 @@ test('Request input shares refreshes by effective Authorization header through i
 			});
 			return 'new-token';
 		},
-	});
+	})(withHeaders({
+		Authorization: 'Bearer expired-token',
+	})(mockFetch));
 
 	const request = new Request('https://example.com/api/request', {
 		headers: {
@@ -2822,7 +2848,7 @@ test('Request Authorization headers share refreshes with matching per-call Autho
 		return new Response(null, {status: isRetry ? 200 : 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			await new Promise(resolve => {
@@ -2830,7 +2856,7 @@ test('Request Authorization headers share refreshes with matching per-call Autho
 			});
 			return 'refreshed-token';
 		},
-	});
+	})(mockFetch);
 
 	const request = new Request('https://example.com/api/request', {
 		headers: {
@@ -2875,11 +2901,7 @@ test('deduplicates by the effective Authorization header from nested withHeaders
 		return new Response(null, {status: 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(withHeaders(withHeaders(mockFetch, {
-		Authorization: 'Bearer expired-token',
-	}), {
-		'X-Test': '1',
-	}), {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			await new Promise(resolve => {
@@ -2887,7 +2909,11 @@ test('deduplicates by the effective Authorization header from nested withHeaders
 			});
 			return 'new-token';
 		},
-	});
+	})(withHeaders({
+		'X-Test': '1',
+	})(withHeaders({
+		Authorization: 'Bearer expired-token',
+	})(mockFetch)));
 
 	const [responseA, responseB] = await Promise.all([
 		fetchWithRefresh('/api/a'),
@@ -2919,9 +2945,7 @@ test('function-based Authorization defaults refresh separately when requests ove
 		return new Response(null, {status: isRetry ? 200 : 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(withHeaders(mockFetch, async () => ({
-		Authorization: `Bearer ${nextToken}`,
-	})), {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 
@@ -2935,7 +2959,9 @@ test('function-based Authorization defaults refresh separately when requests ove
 
 			return `refreshed-${refreshCount}`;
 		},
-	});
+	})(withHeaders(async () => ({
+		Authorization: `Bearer ${nextToken}`,
+	}))(mockFetch));
 
 	const requestA = fetchWithRefresh('/api/a');
 	await firstRefreshStarted;
@@ -2975,7 +3001,11 @@ test('function-based Authorization defaults are resolved once per logical token-
 		return new Response(null, {status: authorization === 'Bearer new-token' ? 200 : 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(withHeaders(mockFetch, async () => {
+	const fetchWithRefresh = withTokenRefresh({
+		async refreshToken() {
+			return 'new-token';
+		},
+	})(withHeaders(async () => {
 		defaultHeaderCallCount++;
 
 		if (defaultHeaderCallCount > 1) {
@@ -2985,11 +3015,7 @@ test('function-based Authorization defaults are resolved once per logical token-
 		return {
 			Authorization: 'Bearer expired-token',
 		};
-	}), {
-		async refreshToken() {
-			return 'new-token';
-		},
-	});
+	})(mockFetch));
 
 	const response = await fetchWithRefresh('/api');
 
@@ -3004,7 +3030,11 @@ test('empty function-based default headers stay stable across a logical token-re
 		return new Response(null, {status: authorization === 'Bearer new-token' ? 200 : 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(withHeaders(mockFetch, async () => {
+	const fetchWithRefresh = withTokenRefresh({
+		async refreshToken() {
+			return 'new-token';
+		},
+	})(withHeaders(async () => {
 		defaultHeaderCallCount++;
 
 		if (defaultHeaderCallCount > 1) {
@@ -3012,11 +3042,7 @@ test('empty function-based default headers stay stable across a logical token-re
 		}
 
 		return {};
-	}), {
-		async refreshToken() {
-			return 'new-token';
-		},
-	});
+	})(mockFetch));
 
 	const response = await fetchWithRefresh('/api');
 
@@ -3062,9 +3088,7 @@ test('per-call Authorization overrides split refreshes from function-based defau
 		return new Response(null, {status: isRetry ? 200 : 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(withHeaders(mockFetch, async () => ({
-		Authorization: 'Bearer default-token',
-	})), {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			await new Promise(resolve => {
@@ -3073,7 +3097,9 @@ test('per-call Authorization overrides split refreshes from function-based defau
 			nextRefreshToken++;
 			return `refreshed-${nextRefreshToken}`;
 		},
-	});
+	})(withHeaders(async () => ({
+		Authorization: 'Bearer default-token',
+	}))(mockFetch));
 
 	const [responseA, responseB, responseC] = await Promise.all([
 		fetchWithRefresh('/api/a'),
@@ -3098,20 +3124,18 @@ test('function-based outer withHeaders chains Authorization resolution to static
 		return new Response(null, {status: authorization === 'Bearer new-token' ? 200 : 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(
-		withHeaders(
-			withHeaders(mockFetch, {Authorization: 'Bearer expired-token'}),
-			async () => ({'X-Trace': 'abc'}),
-		),
-		{
-			async refreshToken() {
-				refreshCount++;
-				await new Promise(resolve => {
-					setTimeout(resolve, 40);
-				});
-				return 'new-token';
-			},
+	const fetchWithRefresh = withTokenRefresh({
+		async refreshToken() {
+			refreshCount++;
+			await new Promise(resolve => {
+				setTimeout(resolve, 40);
+			});
+			return 'new-token';
 		},
+	})(
+		withHeaders(async () => ({'X-Trace': 'abc'}))(
+			withHeaders({Authorization: 'Bearer expired-token'})(mockFetch),
+		),
 	);
 
 	const [responseA, responseB] = await Promise.all([
@@ -3138,12 +3162,12 @@ test('late anonymous 401s do not reuse a settled refresh across batches', async 
 		return new Response(null, {status: 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			return `token-${refreshCount}`;
 		},
-	});
+	})(mockFetch);
 
 	const responseA = await fetchWithRefresh('/api/a');
 	const responseB = await fetchWithRefresh('/api/b');
@@ -3176,7 +3200,7 @@ test('overlapping 401s use Authorization from options over Request headers for d
 		return new Response(null, {status: 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			await new Promise(resolve => {
@@ -3184,7 +3208,7 @@ test('overlapping 401s use Authorization from options over Request headers for d
 			});
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const requests = [
 		new Request('https://example.com/api/a', {
@@ -3233,7 +3257,7 @@ test('different options Authorization overrides on Request inputs refresh separa
 		return new Response(null, {status: isRetry ? 200 : 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			await new Promise(resolve => {
@@ -3241,7 +3265,7 @@ test('different options Authorization overrides on Request inputs refresh separa
 			});
 			return `refreshed-${refreshCount}`;
 		},
-	});
+	})(mockFetch);
 
 	const createRequest = path => new Request(`https://example.com${path}`, {
 		headers: {
@@ -3296,7 +3320,7 @@ test('interleaved Authorization headers still deduplicate per token', async t =>
 		return new Response(null, {status: 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			await new Promise(resolve => {
@@ -3305,7 +3329,7 @@ test('interleaved Authorization headers still deduplicate per token', async t =>
 
 			return `token-for-${refreshCount}`;
 		},
-	});
+	})(mockFetch);
 
 	const [responseA, responseB, responseLateA] = await Promise.all([
 		fetchWithRefresh('/api/a', {
@@ -3350,12 +3374,12 @@ test('retry 401 clears cached refresh for the same Authorization header', async 
 		return new Response(null, {status: 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			return `token-${refreshCount}`;
 		},
-	});
+	})(mockFetch);
 
 	const requestOptions = {
 		headers: {
@@ -3382,7 +3406,7 @@ test('shared refresh failure for an Authorization header resets before the next 
 		return new Response(null, {status: isRetry ? 200 : 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			if (refreshCount === 1) {
@@ -3391,7 +3415,7 @@ test('shared refresh failure for an Authorization header resets before the next 
 
 			return 'recovered-token';
 		},
-	});
+	})(mockFetch);
 
 	const requestOptions = {
 		headers: {
@@ -3427,7 +3451,7 @@ test('aborted refresh wait clears a hung refresh promise for the next request', 
 		return new Response(null, {status: isRetry ? 200 : 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			markRefreshStarted();
@@ -3438,7 +3462,7 @@ test('aborted refresh wait clears a hung refresh promise for the next request', 
 
 			return 'token-2';
 		},
-	});
+	})(mockFetch);
 
 	const firstResponsePromise = fetchWithRefresh('/api/a', {
 		headers: {
@@ -3478,12 +3502,12 @@ test('an aborted waiter does not evict an in-flight shared refresh', async t => 
 		return new Response(null, {status: isRetry ? 200 : 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			return refreshPromise;
 		},
-	});
+	})(mockFetch);
 
 	const firstResponsePromise = fetchWithRefresh('/api/a', {
 		headers: {
@@ -3547,12 +3571,12 @@ test('sync resolveRequestHeadersSymbol keeps overlapping 401s on the same shared
 		return new Headers({Authorization: 'Bearer expired-token'});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			return refreshPromise;
 		},
-	});
+	})(mockFetch);
 
 	const firstResponsePromise = fetchWithRefresh('/api/a');
 	const abortedResponsePromise = fetchWithRefresh('/api/b', {signal: abortController.signal});
@@ -3598,12 +3622,12 @@ test('retry fetch error for an Authorization header resets before the next batch
 		return new Response(null, {status: 200});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			return `token-${refreshCount}`;
 		},
-	});
+	})(mockFetch);
 
 	const requestOptions = {
 		headers: {
@@ -3637,12 +3661,12 @@ test('successful refresh for an Authorization header resets before the next batc
 		return new Response(null, {status: 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			return `token-${refreshCount}`;
 		},
-	});
+	})(mockFetch);
 
 	const requestOptions = {
 		headers: {
@@ -3667,11 +3691,11 @@ test('successful refresh for an Authorization header resets before the next batc
 test('works with URL object input', async t => {
 	const {mockFetch, getCallCount} = createMockFetch({initialStatus: 401, retryStatus: 200});
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRefresh(new URL('https://example.com/api'));
 	t.is(response.status, 200);
@@ -3698,11 +3722,11 @@ test('works with Headers instance in options', async t => {
 		};
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	await fetchWithRefresh('/api/users', {
 		headers: new Headers({'Content-Type': 'application/json', 'X-Custom': 'value'}),
@@ -3718,11 +3742,11 @@ test('does not mutate original Request headers when retrying', async t => {
 		status: new Request(urlOrRequest, options).headers.get('Authorization') === 'Bearer new-token' ? 200 : 401,
 	});
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const request = new Request('https://example.com/api/users', {
 		headers: {
@@ -3755,11 +3779,11 @@ test('retry uses the same URL', async t => {
 		};
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	await fetchWithRefresh('/api/users');
 	t.is(urls.length, 2);
@@ -3786,11 +3810,11 @@ test('works without options argument', async t => {
 		};
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRefresh('/api/users');
 	t.is(response.status, 200);
@@ -3804,11 +3828,11 @@ test('propagates network errors from initial fetch', async t => {
 		throw new TypeError('Failed to fetch');
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	await t.throwsAsync(fetchWithRefresh('/api/users'), {
 		instanceOf: TypeError,
@@ -3834,11 +3858,11 @@ test('propagates network errors from retry fetch', async t => {
 		throw new TypeError('Failed to fetch');
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	await t.throwsAsync(fetchWithRefresh('/api/users'), {
 		instanceOf: TypeError,
@@ -3867,7 +3891,7 @@ test('deduplication resets between separate concurrent batches', async t => {
 		};
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCount++;
 			await new Promise(resolve => {
@@ -3875,7 +3899,7 @@ test('deduplication resets between separate concurrent batches', async t => {
 			});
 			return `token-${refreshCount}`;
 		},
-	});
+	})(mockFetch);
 
 	await Promise.all([
 		fetchWithRefresh('/api/a'),
@@ -3908,19 +3932,19 @@ test('separate wrapper instances do not share refresh state', async t => {
 		};
 	};
 
-	const fetchA = withTokenRefresh(mockFetch, {
+	const fetchA = withTokenRefresh({
 		async refreshToken() {
 			refreshCountA++;
 			return 'token-a';
 		},
-	});
+	})(mockFetch);
 
-	const fetchB = withTokenRefresh(mockFetch, {
+	const fetchB = withTokenRefresh({
 		async refreshToken() {
 			refreshCountB++;
 			return 'token-b';
 		},
-	});
+	})(mockFetch);
 
 	const [responseA, responseB] = await Promise.all([
 		fetchA('/api/a'),
@@ -3953,11 +3977,11 @@ test('Request with no custom headers only gets Authorization on retry', async t 
 		};
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const request = new Request('https://example.com/api');
 	const response = await fetchWithRefresh(request);
@@ -3973,12 +3997,12 @@ test('rejects when signal is already aborted before the call', async t => {
 		return new Response(null, {status: 401});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			refreshCalled = true;
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const abortController = new AbortController();
 	abortController.abort(new DOMException('Already aborted', 'AbortError'));
@@ -3994,11 +4018,11 @@ test('rejects when signal is already aborted before the call', async t => {
 test('works when refreshToken returns a synchronous value', async t => {
 	const {mockFetch, getCallCount} = createMockFetch({initialStatus: 401, retryStatus: 200});
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		refreshToken() {
 			return 'sync-token';
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRefresh('/api/users');
 	t.is(response.status, 200);
@@ -4021,11 +4045,11 @@ test('retries Blob body on 401', async t => {
 		});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRefresh('https://example.com/api', {
 		method: 'POST',
@@ -4051,11 +4075,11 @@ test('retries ArrayBuffer body on 401', async t => {
 		});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRefresh('https://example.com/api', {
 		method: 'POST',
@@ -4081,11 +4105,11 @@ test('retries URLSearchParams body on 401', async t => {
 		});
 	};
 
-	const fetchWithRefresh = withTokenRefresh(mockFetch, {
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRefresh('https://example.com/api', {
 		method: 'POST',
@@ -4099,14 +4123,14 @@ test('retries URLSearchParams body on 401', async t => {
 test('copyFetchMetadata propagates timeout through withTokenRefresh', async t => {
 	const mockFetch = async () => new Response(null, {status: 200});
 
-	const fetchWithTimeout = withTimeout(mockFetch, 5000);
-	const fetchWithRefresh = withTokenRefresh(fetchWithTimeout, {
+	const fetchWithTimeout = withTimeout(5000)(mockFetch);
+	const fetchWithRefresh = withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
-	});
+	})(fetchWithTimeout);
 
-	const outerFetch = withHeaders(fetchWithRefresh, {'X-Test': '1'});
+	const outerFetch = withHeaders({'X-Test': '1'})(fetchWithRefresh);
 
 	// The timeout symbol should propagate through withTokenRefresh to outer wrappers
 	const {timeoutDurationSymbol} = await import('../source/utilities.js');

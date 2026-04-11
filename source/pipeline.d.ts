@@ -10,10 +10,10 @@ You can write:
 ```
 const apiFetch = pipeline(
 	fetch,
-	f => withTimeout(f, 5000),
-	f => withBaseUrl(f, 'https://api.example.com'),
-	f => withHeaders(f, {Authorization: 'Bearer token'}),
-	withHttpError,
+	withTimeout(5000),
+	withBaseUrl('https://api.example.com'),
+	withHeaders({Authorization: 'Bearer token'}),
+	withHttpError(),
 );
 ```
 
@@ -22,13 +22,11 @@ Functions are applied left to right: the first function receives the initial val
 Equivalent nested form:
 
 ```
-const apiFetch = withHttpError(
-	withHeaders(
-		withBaseUrl(
-			withTimeout(fetch, 5000),
-			'https://api.example.com',
+const apiFetch = withHttpError()(
+	withHeaders({Authorization: 'Bearer token'})(
+		withBaseUrl('https://api.example.com')(
+			withTimeout(5000)(fetch),
 		),
-		{Authorization: 'Bearer token'},
 	),
 );
 ```
@@ -48,10 +46,10 @@ import {pipeline, withHttpError, withTimeout, withBaseUrl, withHeaders} from 'fe
 // - Times out after 5 seconds
 const apiFetch = pipeline(
 	fetch,
-	f => withTimeout(f, 5000),
-	f => withBaseUrl(f, 'https://api.example.com'),
-	f => withHeaders(f, {Authorization: 'Bearer token'}),
-	withHttpError,
+	withTimeout(5000),
+	withBaseUrl('https://api.example.com'),
+	withHeaders({Authorization: 'Bearer token'}),
+	withHttpError(),
 );
 
 const response = await apiFetch('/users');
@@ -60,7 +58,7 @@ const data = await response.json();
 */
 // These overloads exist to preserve contextual typing for each stage.
 // A shorter variadic generic signature would be nicer, but in practice it does not reliably
-// infer callback parameter types for the documented pipeline(fetch, f => ..., withHttpError) pattern.
+// infer callback parameter types for the documented pipeline(fetch, withTimeout(5000), withHttpError()) pattern.
 export function pipeline<Value>(value: Value): Value;
 export function pipeline<Value, Result1>(value: Value, function1: (value: Value) => Result1): Result1;
 export function pipeline<Value, Result1, Result2>(value: Value, function1: (value: Value) => Result1, function2: (value: Result1) => Result2): Result2;

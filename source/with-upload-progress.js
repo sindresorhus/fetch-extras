@@ -60,38 +60,40 @@ function markBlockedDefaultHeaders(object, headerNames) {
 	return object;
 }
 
-export function withUploadProgress(fetchFunction, {onProgress} = {}) {
-	const fetchWithUploadProgress = async (urlOrRequest, options = {}) => {
-		if (onProgress) {
-			const {body} = options;
+export function withUploadProgress({onProgress} = {}) {
+	return fetchFunction => {
+		const fetchWithUploadProgress = async (urlOrRequest, options = {}) => {
+			if (onProgress) {
+				const {body} = options;
 
-			if (body instanceof ReadableStream) {
-				const trackedStream = isByteStream(body) ? trackByteProgress(body, 0, onProgress) : trackProgress(body, 0, onProgress);
+				if (body instanceof ReadableStream) {
+					const trackedStream = isByteStream(body) ? trackByteProgress(body, 0, onProgress) : trackProgress(body, 0, onProgress);
 
-				if (urlOrRequest instanceof Request) {
-					if (options[inheritedRequestBodyHeaderNamesSymbol]) {
-						options = {
-							...options,
-							headers: deleteHeaders(new Headers(options.headers), options[inheritedRequestBodyHeaderNamesSymbol]),
-						};
-					} else {
-						options = {
-							...options,
-							headers: mergeMissingRequestHeaders(options.headers, urlOrRequest.headers),
-						};
+					if (urlOrRequest instanceof Request) {
+						if (options[inheritedRequestBodyHeaderNamesSymbol]) {
+							options = {
+								...options,
+								headers: deleteHeaders(new Headers(options.headers), options[inheritedRequestBodyHeaderNamesSymbol]),
+							};
+						} else {
+							options = {
+								...options,
+								headers: mergeMissingRequestHeaders(options.headers, urlOrRequest.headers),
+							};
+						}
+
+						const rebuiltRequest = new Request(urlOrRequest.url, requestSnapshot(urlOrRequest));
+						rebuiltRequest[blockedDefaultHeaderNamesSymbol] = urlOrRequest[blockedDefaultHeaderNamesSymbol];
+						urlOrRequest = rebuiltRequest;
 					}
 
-					const rebuiltRequest = new Request(urlOrRequest.url, requestSnapshot(urlOrRequest));
-					rebuiltRequest[blockedDefaultHeaderNamesSymbol] = urlOrRequest[blockedDefaultHeaderNamesSymbol];
-					urlOrRequest = rebuiltRequest;
+					options = markBlockedDefaultHeaders({...options, body: trackedStream, duplex: 'half'}, blockedRequestBodyHeaderNames);
 				}
-
-				options = markBlockedDefaultHeaders({...options, body: trackedStream, duplex: 'half'}, blockedRequestBodyHeaderNames);
 			}
-		}
 
-		return fetchFunction(urlOrRequest, options);
+			return fetchFunction(urlOrRequest, options);
+		};
+
+		return copyFetchMetadata(fetchWithUploadProgress, fetchFunction);
 	};
-
-	return copyFetchMetadata(fetchWithUploadProgress, fetchFunction);
 }

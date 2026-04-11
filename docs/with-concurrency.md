@@ -1,6 +1,6 @@
 # withConcurrency
 
-## withConcurrency(fetchFunction, options)
+## withConcurrency(options)
 
 Wraps a fetch function with a concurrency limit. When the maximum number of requests are already running until `fetch()` resolves, additional calls are queued and executed as earlier ones complete.
 
@@ -8,13 +8,12 @@ This is different from [`withRateLimit`](with-rate-limit.md), which caps how man
 
 ## Parameters
 
-- `fetchFunction` (`typeof fetch`) - The fetch function to wrap (usually the global `fetch`).
 - `options` (`object`)
   - `maxConcurrentRequests` (`number`) - Maximum number of requests allowed to run at the same time until `fetch()` resolves.
 
 ## Returns
 
-A wrapped fetch function that enforces the concurrency limit.
+A function that takes a fetch function and returns a wrapped fetch function that enforces the concurrency limit.
 
 > [!NOTE]
 > The concurrency state is shared across all calls to the returned function. To limit different hosts independently, create separate `withConcurrency` wrappers.
@@ -31,9 +30,9 @@ A wrapped fetch function that enforces the concurrency limit.
 import {withConcurrency} from 'fetch-extras';
 
 // Allow at most 5 fetch() calls to run at the same time
-const concurrentFetch = withConcurrency(fetch, {
+const concurrentFetch = withConcurrency({
 	maxConcurrentRequests: 5,
-});
+})(fetch);
 
 const response = await concurrentFetch('/api/data');
 const data = await response.json();
@@ -46,9 +45,9 @@ import {pipeline, withHttpError, withConcurrency, withBaseUrl} from 'fetch-extra
 
 const apiFetch = pipeline(
 	fetch,
-	f => withBaseUrl(f, 'https://api.example.com'),
-	f => withConcurrency(f, {maxConcurrentRequests: 5}),
-	withHttpError,
+	withBaseUrl('https://api.example.com'),
+	withConcurrency({maxConcurrentRequests: 5}),
+	withHttpError(),
 );
 
 const response = await apiFetch('/users');

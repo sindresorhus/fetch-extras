@@ -1,6 +1,6 @@
 # withHooks
 
-## withHooks(fetchFunction, options?)
+## withHooks(options?)
 
 Wraps a fetch function with hooks that run before each request and after each response.
 
@@ -8,14 +8,13 @@ This is the recommended way to add custom logic (logging, metrics, dynamic heade
 
 ## Parameters
 
-- `fetchFunction` (`typeof fetch`) - The fetch function to wrap (usually the global `fetch`).
 - `options` (`object`)
   - `beforeRequest` (`(context) => RequestInit | Response | void | Promise<RequestInit | Response | void>`) - Called before each request. The context object has `{url, options}` where `url` is the resolved URL string and `options` is the effective `RequestInit` for that stage. Return a replacement `RequestInit` to modify the request options, return a `Response` to short-circuit the request entirely (skipping the fetch call and `afterResponse`), or return `undefined` to leave them unchanged.
   - `afterResponse` (`(context) => Response | void | Promise<Response | void>`) - Called after each response. The context object has `{url, options, response}` where `options` is the same effective `RequestInit` used for that hooked request. Return a replacement `Response` to modify the response, or return `undefined` to leave it unchanged.
 
 ## Returns
 
-A wrapped fetch function with hooks.
+A function that takes a fetch function and returns a wrapped fetch function with hooks.
 
 > [!TIP]
 > The `url` provided to hooks is the resolved URL (after `withBaseUrl`, `withSearchParameters`, etc.), so it reflects the actual URL being requested.
@@ -36,14 +35,14 @@ Logging:
 ```js
 import {withHooks} from 'fetch-extras';
 
-const fetchWithLogging = withHooks(fetch, {
+const fetchWithLogging = withHooks({
 	beforeRequest({url, options}) {
 		console.log('→', options.method ?? 'GET', url);
 	},
 	afterResponse({url, response}) {
 		console.log('←', response.status, url);
 	},
-});
+})(fetch);
 
 const response = await fetchWithLogging('https://api.example.com/users');
 ```
@@ -53,7 +52,7 @@ Adding a dynamic header to every request:
 ```js
 import {withHooks} from 'fetch-extras';
 
-const fetchWithRequestId = withHooks(fetch, {
+const fetchWithRequestId = withHooks({
 	beforeRequest({options}) {
 		return {
 			...options,
@@ -63,7 +62,7 @@ const fetchWithRequestId = withHooks(fetch, {
 			},
 		};
 	},
-});
+})(fetch);
 ```
 
 Can be combined with other `with*` functions:
@@ -73,15 +72,15 @@ import {pipeline, withBaseUrl, withHeaders, withRetry, withTokenRefresh, withHoo
 
 const apiFetch = pipeline(
 	fetch,
-	f => withBaseUrl(f, 'https://api.example.com'),
-	f => withHeaders(f, {Authorization: 'Bearer token'}),
-	f => withRetry(f, {retries: 2}),
-	f => withTokenRefresh(f, {
+	withBaseUrl('https://api.example.com'),
+	withHeaders({Authorization: 'Bearer token'}),
+	withRetry({retries: 2}),
+	withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
 	}),
-	f => withHooks(f, {
+	withHooks({
 		beforeRequest({url, options}) {
 			console.log('→', options.method ?? 'GET', url);
 		},
@@ -89,7 +88,7 @@ const apiFetch = pipeline(
 			console.log('←', response.status, url);
 		},
 	}),
-	withHttpError,
+	withHttpError(),
 );
 
 const response = await apiFetch('/users');

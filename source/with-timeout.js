@@ -5,13 +5,15 @@ import {
 	timeoutDurationSymbol,
 } from './utilities.js';
 
-export function withTimeout(fetchFunction, timeout) {
-	const fetchWithTimeout = async (urlOrRequest, options = {}) => {
-		const signal = getTimeoutSignal(timeout, getRequestSignal(urlOrRequest, options));
-		return fetchFunction(urlOrRequest, {...options, signal});
+export function withTimeout(timeout) {
+	return fetchFunction => {
+		const fetchWithTimeout = async (urlOrRequest, options = {}) => {
+			const signal = getTimeoutSignal(timeout, getRequestSignal(urlOrRequest, options));
+			return fetchFunction(urlOrRequest, {...options, signal});
+		};
+
+		fetchWithTimeout[timeoutDurationSymbol] = timeout;
+
+		return copyFetchMetadata(fetchWithTimeout, fetchFunction);
 	};
-
-	fetchWithTimeout[timeoutDurationSymbol] = timeout;
-
-	return copyFetchMetadata(fetchWithTimeout, fetchFunction);
 }

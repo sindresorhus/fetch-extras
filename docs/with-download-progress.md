@@ -1,4 +1,6 @@
-# `withDownloadProgress(fetchFunction, options?)`
+# withDownloadProgress
+
+## withDownloadProgress(options?)
 
 Wraps a fetch function with download progress tracking.
 
@@ -6,13 +8,12 @@ The original response metadata such as `url`, `type`, and `redirected` is preser
 
 ## Parameters
 
-- `fetchFunction` (`typeof fetch`) - The fetch function to wrap (usually the global `fetch`).
 - `options` (optional)
 	- `onProgress` (`(progress: Progress) => void`) - Called as response data is received.
 
 ## Returns
 
-A wrapped fetch function that reports download progress.
+A function that takes a fetch function and returns a wrapped fetch function that reports download progress.
 
 ## Progress
 
@@ -27,11 +28,11 @@ The `Progress` object has the following properties:
 ```js
 import {withDownloadProgress} from 'fetch-extras';
 
-const fetchWithDownloadProgress = withDownloadProgress(fetch, {
+const fetchWithDownloadProgress = withDownloadProgress({
 	onProgress(progress) {
 		console.log(`Download: ${Math.round(progress.percent * 100)}%`);
 	},
-});
+})(fetch);
 
 const response = await fetchWithDownloadProgress('https://example.com/large-file');
 const data = await response.arrayBuffer();

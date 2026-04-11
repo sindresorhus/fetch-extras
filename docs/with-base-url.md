@@ -1,13 +1,13 @@
 # withBaseUrl
 
-## withBaseUrl(fetchFunction, baseUrl)
+## withBaseUrl(baseUrl)
 
-Returns a wrapped fetch function that resolves relative URLs against a base URL. Useful for API clients with a consistent base URL.
+Wraps a fetch function to resolve relative URLs against a base URL. Useful for API clients with a consistent base URL.
 
 ```js
 import {withBaseUrl} from 'fetch-extras';
 
-const fetchWithBaseUrl = withBaseUrl(fetch, 'https://api.example.com');
+const fetchWithBaseUrl = withBaseUrl('https://api.example.com')(fetch);
 const response = await fetchWithBaseUrl('/users'); // Requests https://api.example.com/users
 const data = await response.json();
 ```
@@ -16,8 +16,8 @@ Only string-based relative URLs are resolved against the base URL. Absolute URLs
 
 ```js
 // Both of these work the same way
-const fetch1 = withBaseUrl(fetch, 'https://api.example.com/v1');
-const fetch2 = withBaseUrl(fetch, 'https://api.example.com/v1/');
+const fetch1 = withBaseUrl('https://api.example.com/v1')(fetch);
+const fetch2 = withBaseUrl('https://api.example.com/v1/')(fetch);
 
 await fetch1('users'); // https://api.example.com/v1/users
 await fetch2('users'); // https://api.example.com/v1/users
@@ -31,9 +31,9 @@ import {pipeline, withBaseUrl, withHttpError, withTimeout} from 'fetch-extras';
 
 const fetchWithAll = pipeline(
 	fetch,
-	f => withTimeout(f, 5000),
-	f => withBaseUrl(f, 'https://api.example.com'),
-	withHttpError,
+	withTimeout(5000),
+	withBaseUrl('https://api.example.com'),
+	withHttpError(),
 );
 
 const response = await fetchWithAll('/users');
@@ -44,7 +44,7 @@ Works with `paginate()`:
 ```js
 import {paginate, withBaseUrl} from 'fetch-extras';
 
-const fetchWithBaseUrl = withBaseUrl(fetch, 'https://api.github.com');
+const fetchWithBaseUrl = withBaseUrl('https://api.github.com')(fetch);
 
 for await (const commit of paginate('/repos/sindresorhus/ky/commits', {fetchFunction: fetchWithBaseUrl})) {
 	console.log(commit.sha);

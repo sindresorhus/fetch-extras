@@ -1,15 +1,3 @@
-type HookRequestInit<Arguments extends unknown[]> = Arguments extends [unknown]
-	? RequestInit
-	: Arguments extends [unknown, ...infer Rest]
-		? Rest extends [infer RequestInit_]
-			? Exclude<RequestInit_, undefined>
-			: Rest extends [(infer RequestInit_)?]
-				? Exclude<RequestInit_, undefined>
-				: RequestInit
-		: RequestInit;
-
-type HookResponse<FetchFunction extends typeof fetch> = Awaited<ReturnType<FetchFunction>>;
-
 /**
 Wraps a fetch function with hooks that run before each request and after each response.
 
@@ -20,15 +8,15 @@ Can be combined with other `with*` functions:
 ```
 const apiFetch = pipeline(
 	fetch,
-	f => withBaseUrl(f, 'https://api.example.com'),
-	f => withHeaders(f, {Authorization: 'Bearer token'}),
-	f => withRetry(f, {retries: 2}),
-	f => withTokenRefresh(f, {
+	withBaseUrl('https://api.example.com'),
+	withHeaders({Authorization: 'Bearer token'}),
+	withRetry({retries: 2}),
+	withTokenRefresh({
 		async refreshToken() {
 			return 'new-token';
 		},
 	}),
-	f => withHooks(f, {
+	withHooks({
 		beforeRequest({url, options}) {
 			console.log('→', options.method ?? 'GET', url);
 		},
@@ -36,26 +24,25 @@ const apiFetch = pipeline(
 			console.log('←', response.status, url);
 		},
 	}),
-	withHttpError,
+	withHttpError(),
 );
 ```
 
-@param fetchFunction - The fetch function to wrap (usually the global `fetch`).
 @param options - Hook options.
-@returns A wrapped fetch function with hooks.
+@returns A wrapper that takes a fetch function and returns a wrapped fetch function with hooks.
 
 @example
 ```
 import {withHooks} from 'fetch-extras';
 
-const fetchWithLogging = withHooks(fetch, {
+const fetchWithLogging = withHooks({
 	beforeRequest({url, options}) {
 		console.log('→', options.method ?? 'GET', url);
 	},
 	afterResponse({url, response}) {
 		console.log('←', response.status, url);
 	},
-});
+})(fetch);
 
 const response = await fetchWithLogging('https://api.example.com/users');
 ```
@@ -65,7 +52,7 @@ const response = await fetchWithLogging('https://api.example.com/users');
 import {withHooks} from 'fetch-extras';
 
 // Add a dynamic request ID header to every request
-const fetchWithRequestId = withHooks(fetch, {
+const fetchWithRequestId = withHooks({
 	beforeRequest({options}) {
 		return {
 			...options,
@@ -75,11 +62,10 @@ const fetchWithRequestId = withHooks(fetch, {
 			},
 		};
 	},
-});
+})(fetch);
 ```
 */
-export function withHooks<FetchFunction extends typeof fetch>(
-	fetchFunction: FetchFunction,
+export function withHooks(
 	options?: {
 		/**
 		Called before each request. Receives the resolved URL and the effective request options for that stage.
@@ -88,8 +74,8 @@ export function withHooks<FetchFunction extends typeof fetch>(
 		*/
 		readonly beforeRequest?: (context: {
 			readonly url: string;
-			readonly options: HookRequestInit<Parameters<FetchFunction>>;
-		}) => HookRequestInit<Parameters<FetchFunction>> | HookResponse<FetchFunction> | void | Promise<HookRequestInit<Parameters<FetchFunction>> | HookResponse<FetchFunction> | void>;
+			readonly options: RequestInit;
+		}) => RequestInit | Response | void | Promise<RequestInit | Response | void>;
 
 		/**
 		Called after each response. Receives the response, resolved URL, and the same effective request options used for that hooked request.
@@ -98,8 +84,8 @@ export function withHooks<FetchFunction extends typeof fetch>(
 		*/
 		readonly afterResponse?: (context: {
 			readonly url: string;
-			readonly options: HookRequestInit<Parameters<FetchFunction>>;
-			readonly response: HookResponse<FetchFunction>;
-		}) => HookResponse<FetchFunction> | void | Promise<HookResponse<FetchFunction> | void>;
+			readonly options: RequestInit;
+			readonly response: Response;
+		}) => Response | void | Promise<Response | void>;
 	},
-): (...arguments_: Parameters<FetchFunction>) => ReturnType<FetchFunction>;
+): (fetchFunction: typeof fetch) => typeof fetch;

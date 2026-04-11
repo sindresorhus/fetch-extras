@@ -62,7 +62,7 @@ import {withJsonResponse, SchemaValidationError} from 'fetch-extras';
 import {z} from 'zod';
 
 const userSchema = z.object({name: z.string()});
-const fetchUser = withJsonResponse(fetch, {schema: userSchema});
+const fetchUser = withJsonResponse({schema: userSchema})(fetch);
 
 try {
 	const user = await fetchUser('/api/user');
@@ -99,15 +99,14 @@ Unlike other wrappers, this one returns parsed data instead of a `Response`, so 
 
 Empty responses are not special-cased. If the response body is empty, including `204`, `205`, or `HEAD` responses, this wrapper throws the same `SyntaxError` as `Response.json()`. This is intentional: returning `null` would widen every call site's return type to `T | null`, forcing unnecessary null-checks. If your endpoint can return empty responses, handle that before this wrapper in the pipeline.
 
-@param fetchFunction - The fetch function to wrap (usually the global `fetch`).
-@returns A wrapped fetch function that returns the parsed JSON data.
+@returns A wrapper that takes a fetch function and returns a wrapped fetch function that returns the parsed JSON data.
 @throws {SyntaxError} When the response body is empty or is not valid JSON.
 
 @example
 ```
 import {withJsonResponse} from 'fetch-extras';
 
-const fetchJson = withJsonResponse(fetch);
+const fetchJson = withJsonResponse()(fetch);
 const data = await fetchJson('/api/user/1');
 
 console.log(data.name);
@@ -119,17 +118,17 @@ import {pipeline, withHttpError, withTimeout, withJsonResponse} from 'fetch-extr
 
 const fetchJson = pipeline(
 	fetch,
-	f => withTimeout(f, 5000),
-	withHttpError,
-	withJsonResponse,
+	withTimeout(5000),
+	withHttpError(),
+	withJsonResponse(),
 );
 
 const data = await fetchJson('/api/user/1');
 ```
 */
-export function withJsonResponse<FetchFunction extends typeof fetch>(
-	fetchFunction: FetchFunction,
-): (...arguments_: Parameters<FetchFunction>) => Promise<unknown>;
+export function withJsonResponse(): (
+	fetchFunction: typeof fetch,
+) => (...arguments_: Parameters<typeof fetch>) => Promise<unknown>;
 
 /**
 Wraps a fetch function to automatically parse response bodies as JSON and validate against a [Standard Schema](https://standardschema.dev).
@@ -140,10 +139,9 @@ Unlike other wrappers, this one returns validated data instead of a `Response`, 
 
 Empty responses are not special-cased. If the response body is empty, including `204`, `205`, or `HEAD` responses, this wrapper throws the same `SyntaxError` as `Response.json()`. This is intentional: returning `null` would widen every call site's return type to `T | null`, forcing unnecessary null-checks. If your endpoint can return empty responses, handle that before this wrapper in the pipeline.
 
-@param fetchFunction - The fetch function to wrap (usually the global `fetch`).
 @param options - Options object.
 @param options.schema - A Standard Schema object to validate response JSON against.
-@returns A wrapped fetch function that returns the validated data.
+@returns A wrapper that takes a fetch function and returns a wrapped fetch function that returns the validated data.
 @throws {SyntaxError} When the response body is empty or is not valid JSON.
 @throws {SchemaValidationError} When the response JSON does not match the schema.
 
@@ -154,7 +152,7 @@ import {z} from 'zod';
 
 const userSchema = z.object({name: z.string(), age: z.number()});
 
-const fetchUser = withJsonResponse(fetch, {schema: userSchema});
+const fetchUser = withJsonResponse({schema: userSchema})(fetch);
 const user = await fetchUser('/api/user/1');
 
 console.log(user.name);
@@ -169,18 +167,18 @@ const userSchema = z.object({name: z.string()});
 
 const fetchUser = pipeline(
 	fetch,
-	f => withTimeout(f, 5000),
-	withHttpError,
-	f => withJsonResponse(f, {schema: userSchema}),
+	withTimeout(5000),
+	withHttpError(),
+	withJsonResponse({schema: userSchema}),
 );
 
 const user = await fetchUser('/api/user/1');
 ```
 */
 export function withJsonResponse<
-	FetchFunction extends typeof fetch,
 	Schema extends StandardSchemaV1 | undefined = undefined,
 >(
-	fetchFunction: FetchFunction,
 	options?: {schema?: Schema},
-): (...arguments_: Parameters<FetchFunction>) => Promise<Schema extends StandardSchemaV1 ? StandardSchemaV1InferOutput<Schema> : unknown>;
+): (
+	fetchFunction: typeof fetch,
+) => (...arguments_: Parameters<typeof fetch>) => Promise<Schema extends StandardSchemaV1 ? StandardSchemaV1InferOutput<Schema> : unknown>;

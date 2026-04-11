@@ -7,19 +7,18 @@ Upload progress is best-effort and only supported when the effective request bod
 
 When composing with `withTokenRefresh()`, place `withUploadProgress()` inside `withTokenRefresh()` if you want progress for both the initial send and the retry. If `withUploadProgress()` wraps `withTokenRefresh()`, it only observes the first call into `withTokenRefresh()`.
 
-@param fetchFunction - The fetch function to wrap (usually the global `fetch`).
 @param options - Upload progress callback options.
-@returns A wrapped fetch function that reports upload progress for explicit streamed bodies.
+@returns A wrapper that takes a fetch function and returns a wrapped fetch function that reports upload progress for explicit streamed bodies.
 
 @example
 ```
 import {withUploadProgress} from 'fetch-extras';
 
-const fetchWithUploadProgress = withUploadProgress(fetch, {
+const fetchWithUploadProgress = withUploadProgress({
 	onProgress(progress) {
 		console.log(`Upload: ${Math.round(progress.percent * 100)}%`);
 	},
-});
+})(fetch);
 
 await fetchWithUploadProgress('https://example.com/upload', {
 	method: 'POST',
@@ -29,8 +28,7 @@ await fetchWithUploadProgress('https://example.com/upload', {
 ```
 */
 export function withUploadProgress(
-	fetchFunction: typeof fetch,
 	options?: {
 		onProgress?: (progress: Progress) => void;
 	}
-): typeof fetch;
+): (fetchFunction: typeof fetch) => typeof fetch;

@@ -29,14 +29,14 @@ const createTimedMockFetch = delay => async (url, options = {}) => {
 
 test('withTimeout - should abort request after timeout', async t => {
 	const slowFetch = createTimedMockFetch(200);
-	const fetchWithTimeout = withTimeout(slowFetch, 100);
+	const fetchWithTimeout = withTimeout(100)(slowFetch);
 
 	await t.throwsAsync(fetchWithTimeout('/test'), {name: 'AbortError'});
 });
 
 test('withTimeout - should respect existing abort signal via options', async t => {
 	const mockFetch = createTimedMockFetch(100);
-	const fetchWithTimeout = withTimeout(mockFetch, 1000);
+	const fetchWithTimeout = withTimeout(1000)(mockFetch);
 	const controller = new AbortController();
 
 	controller.abort();
@@ -46,7 +46,7 @@ test('withTimeout - should respect existing abort signal via options', async t =
 
 test('withTimeout - should respect abort signal from a Request object', async t => {
 	const mockFetch = createTimedMockFetch(100);
-	const fetchWithTimeout = withTimeout(mockFetch, 1000);
+	const fetchWithTimeout = withTimeout(1000)(mockFetch);
 	const controller = new AbortController();
 
 	controller.abort();
@@ -57,7 +57,7 @@ test('withTimeout - should respect abort signal from a Request object', async t 
 
 test('withTimeout - should complete before timeout', async t => {
 	const quickFetch = createTimedMockFetch(50);
-	const fetchWithTimeout = withTimeout(quickFetch, 1000);
+	const fetchWithTimeout = withTimeout(1000)(quickFetch);
 
 	const response = await fetchWithTimeout('/test');
 	t.deepEqual(response, {

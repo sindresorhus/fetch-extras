@@ -30,7 +30,7 @@ const createMockFetch = ({delay: delayMs = 0} = {}) => {
 
 test('passes through requests within the concurrency limit', async t => {
 	const mockFetch = createMockFetch({delay: 50});
-	const limitedFetch = withConcurrency(mockFetch, {maxConcurrentRequests: 3});
+	const limitedFetch = withConcurrency({maxConcurrentRequests: 3})(mockFetch);
 
 	await Promise.all([
 		limitedFetch('/a'),
@@ -52,7 +52,7 @@ test('limits concurrent requests', async t => {
 		return {ok: true, status: 200, url};
 	};
 
-	const limitedFetch = withConcurrency(mockFetch, {maxConcurrentRequests: 2});
+	const limitedFetch = withConcurrency({maxConcurrentRequests: 2})(mockFetch);
 
 	await Promise.all([
 		limitedFetch('/a'),
@@ -64,6 +64,32 @@ test('limits concurrent requests', async t => {
 	t.is(maxActive, 2);
 });
 
+test('reused concurrency wrapper shares limits across wrapped fetch functions', async t => {
+	let activeCount = 0;
+	let maxActive = 0;
+	const startedUrls = [];
+	const createFetch = () => async url => {
+		startedUrls.push(url);
+		activeCount++;
+		maxActive = Math.max(maxActive, activeCount);
+		await sleep(50);
+		activeCount--;
+		return {ok: true, status: 200, url};
+	};
+
+	const limit = withConcurrency({maxConcurrentRequests: 1});
+	const limitedFetchA = limit(createFetch());
+	const limitedFetchB = limit(createFetch());
+
+	await Promise.all([
+		limitedFetchA('/a'),
+		limitedFetchB('/b'),
+	]);
+
+	t.is(maxActive, 1);
+	t.deepEqual(startedUrls, ['/a', '/b']);
+});
+
 test('queued requests execute as slots free up', async t => {
 	const order = [];
 	const mockFetch = async url => {
@@ -73,7 +99,7 @@ test('queued requests execute as slots free up', async t => {
 		return {ok: true, status: 200, url};
 	};
 
-	const limitedFetch = withConcurrency(mockFetch, {maxConcurrentRequests: 1});
+	const limitedFetch = withConcurrency({maxConcurrentRequests: 1})(mockFetch);
 
 	await Promise.all([
 		limitedFetch('/a'),
@@ -97,7 +123,7 @@ test('respects abort signal while waiting', async t => {
 		return {ok: true, status: 200, url};
 	};
 
-	const limitedFetch = withConcurrency(mockFetch, {maxConcurrentRequests: 1});
+	const limitedFetch = withConcurrency({maxConcurrentRequests: 1})(mockFetch);
 
 	const first = limitedFetch('/a');
 
@@ -118,7 +144,7 @@ test('respects already-aborted signal', async t => {
 		return {ok: true, status: 200, url};
 	};
 
-	const limitedFetch = withConcurrency(mockFetch, {maxConcurrentRequests: 1});
+	const limitedFetch = withConcurrency({maxConcurrentRequests: 1})(mockFetch);
 
 	const first = limitedFetch('/a');
 
@@ -139,7 +165,7 @@ test('preserves custom abort reason while waiting', async t => {
 		return {ok: true, status: 200, url};
 	};
 
-	const limitedFetch = withConcurrency(mockFetch, {maxConcurrentRequests: 1});
+	const limitedFetch = withConcurrency({maxConcurrentRequests: 1})(mockFetch);
 
 	const first = limitedFetch('/a');
 
@@ -167,7 +193,7 @@ test('aborted request does not consume a concurrency slot', async t => {
 		return {ok: true, status: 200, url};
 	};
 
-	const limitedFetch = withConcurrency(mockFetch, {maxConcurrentRequests: 1});
+	const limitedFetch = withConcurrency({maxConcurrentRequests: 1})(mockFetch);
 
 	const first = limitedFetch('/a');
 
@@ -194,7 +220,7 @@ test('fetch errors do not leak concurrency slots', async t => {
 		return new Response('ok', {status: 200});
 	};
 
-	const limitedFetch = withConcurrency(mockFetch, {maxConcurrentRequests: 1});
+	const limitedFetch = withConcurrency({maxConcurrentRequests: 1})(mockFetch);
 
 	await t.throwsAsync(limitedFetch('/a'), {instanceOf: TypeError, message: 'fetch failed'});
 	const response = await limitedFetch('/b');
@@ -221,7 +247,7 @@ test('deferred inner waits do not consume concurrency slots before fetch starts'
 
 	deferredFetch[defersConcurrencySlotSymbol] = true;
 
-	const limitedFetch = withConcurrency(deferredFetch, {maxConcurrentRequests: 2});
+	const limitedFetch = withConcurrency({maxConcurrentRequests: 2})(deferredFetch);
 
 	await Promise.all([
 		limitedFetch('/a'),
@@ -244,9 +270,8 @@ test('nested concurrency wrappers still enforce the outer limit', async t => {
 		return new Response('ok');
 	};
 
-	const limitedFetch = withConcurrency(
-		withConcurrency(mockFetch, {maxConcurrentRequests: 5}),
-		{maxConcurrentRequests: 1},
+	const limitedFetch = withConcurrency({maxConcurrentRequests: 1})(
+		withConcurrency({maxConcurrentRequests: 5})(mockFetch),
 	);
 
 	await Promise.all([
@@ -272,7 +297,7 @@ test('response bodies do not keep the slot after fetch resolves', async t => {
 		return new Response('ok');
 	};
 
-	const limitedFetch = withConcurrency(mockFetch, {maxConcurrentRequests: 1});
+	const limitedFetch = withConcurrency({maxConcurrentRequests: 1})(mockFetch);
 	const firstResponse = await limitedFetch('/a');
 	const secondResponsePromise = limitedFetch('/b');
 
@@ -294,7 +319,7 @@ test('forwards request arguments to the inner fetch', async t => {
 		return {ok: true, status: 200};
 	};
 
-	const limitedFetch = withConcurrency(mockFetch, {maxConcurrentRequests: 10});
+	const limitedFetch = withConcurrency({maxConcurrentRequests: 10})(mockFetch);
 
 	await limitedFetch('https://example.com/api', {
 		method: 'POST',
@@ -310,9 +335,9 @@ test('forwards request arguments to the inner fetch', async t => {
 
 test('copyFetchMetadata propagates timeout through withConcurrency', async t => {
 	const mockFetch = async () => new Response(null, {status: 200});
-	const fetchWithTimeout = withTimeout(mockFetch, 5000);
-	const limitedFetch = withConcurrency(fetchWithTimeout, {maxConcurrentRequests: 5});
-	const outerFetch = withHeaders(limitedFetch, {'X-Test': '1'});
+	const fetchWithTimeout = withTimeout(5000)(mockFetch);
+	const limitedFetch = withConcurrency({maxConcurrentRequests: 5})(fetchWithTimeout);
+	const outerFetch = withHeaders({'X-Test': '1'})(limitedFetch);
 	const {timeoutDurationSymbol} = await import('../source/utilities.js');
 
 	t.is(outerFetch[timeoutDurationSymbol], 5000);
@@ -331,7 +356,7 @@ test('inner withTimeout applies while waiting for a concurrency slot', async t =
 	});
 
 	// First request holds the slot for 500ms; timeout is 50ms so second request times out while queued
-	const limitedFetch = withConcurrency(withTimeout(mockFetch, 50), {maxConcurrentRequests: 1});
+	const limitedFetch = withConcurrency({maxConcurrentRequests: 1})(withTimeout(50)(mockFetch));
 
 	const first = limitedFetch('/a');
 
@@ -349,7 +374,7 @@ test('respects Request signal while waiting', async t => {
 		return {ok: true, status: 200, url};
 	};
 
-	const limitedFetch = withConcurrency(mockFetch, {maxConcurrentRequests: 1});
+	const limitedFetch = withConcurrency({maxConcurrentRequests: 1})(mockFetch);
 
 	const first = limitedFetch('/a');
 
@@ -373,7 +398,7 @@ test('preserves FIFO order for queued requests', async t => {
 		return {ok: true, status: 200, url};
 	};
 
-	const limitedFetch = withConcurrency(mockFetch, {maxConcurrentRequests: 1});
+	const limitedFetch = withConcurrency({maxConcurrentRequests: 1})(mockFetch);
 
 	await Promise.all([
 		limitedFetch('/a'),
@@ -386,7 +411,7 @@ test('preserves FIFO order for queued requests', async t => {
 
 test('aborting the queued head allows the next queued request to proceed', async t => {
 	const mockFetch = createMockFetch({delay: 50});
-	const limitedFetch = withConcurrency(mockFetch, {maxConcurrentRequests: 1});
+	const limitedFetch = withConcurrency({maxConcurrentRequests: 1})(mockFetch);
 
 	const first = limitedFetch('/a');
 
@@ -408,7 +433,7 @@ test('aborting the queued head allows the next queued request to proceed', async
 
 test('options.signal takes precedence over Request signal', async t => {
 	const mockFetch = createMockFetch({delay: 50});
-	const limitedFetch = withConcurrency(mockFetch, {maxConcurrentRequests: 1});
+	const limitedFetch = withConcurrency({maxConcurrentRequests: 1})(mockFetch);
 
 	const first = limitedFetch('/a');
 	await first;
@@ -423,19 +448,19 @@ test('options.signal takes precedence over Request signal', async t => {
 });
 
 test('throws on non-integer maxConcurrentRequests', t => {
-	t.throws(() => withConcurrency(fetch, {maxConcurrentRequests: 2.5}), {
+	t.throws(() => withConcurrency({maxConcurrentRequests: 2.5})(fetch), {
 		instanceOf: TypeError,
 	});
 });
 
 test('throws on zero maxConcurrentRequests', t => {
-	t.throws(() => withConcurrency(fetch, {maxConcurrentRequests: 0}), {
+	t.throws(() => withConcurrency({maxConcurrentRequests: 0})(fetch), {
 		instanceOf: TypeError,
 	});
 });
 
 test('throws on negative maxConcurrentRequests', t => {
-	t.throws(() => withConcurrency(fetch, {maxConcurrentRequests: -1}), {
+	t.throws(() => withConcurrency({maxConcurrentRequests: -1})(fetch), {
 		instanceOf: TypeError,
 	});
 });

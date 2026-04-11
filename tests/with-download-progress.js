@@ -51,11 +51,11 @@ function trackDownloadProgress(chunks, contentLength) {
 
 	return {
 		events,
-		fetchWithDownloadProgress: withDownloadProgress(createStreamingFetch(chunks, contentLength), {
+		fetchWithDownloadProgress: withDownloadProgress({
 			onProgress(progress) {
 				events.push(progress);
 			},
-		}),
+		})(createStreamingFetch(chunks, contentLength)),
 	};
 }
 
@@ -135,9 +135,9 @@ test('withDownloadProgress - reports the current chunk as soon as it is read', a
 });
 
 test('withDownloadProgress - preserves byte-stream readers', async t => {
-	const response = await withDownloadProgress(fetch, {
+	const response = await withDownloadProgress({
 		onProgress() {},
-	})('data:application/octet-stream;base64,AAEC');
+	})(fetch)('data:application/octet-stream;base64,AAEC');
 	const {done, value} = await readByteStream(response);
 
 	t.false(done);
@@ -146,11 +146,11 @@ test('withDownloadProgress - preserves byte-stream readers', async t => {
 
 test('withDownloadProgress - BYOB readers receive completion without an extra read', async t => {
 	const events = [];
-	const response = await withDownloadProgress(fetch, {
+	const response = await withDownloadProgress({
 		onProgress(progress) {
 			events.push(progress);
 		},
-	})('data:application/octet-stream;base64,AAEC');
+	})(fetch)('data:application/octet-stream;base64,AAEC');
 	const {done, value} = await readByteStream(response);
 
 	t.false(done);
@@ -166,7 +166,11 @@ test('withDownloadProgress - BYOB readers receive completion without an extra re
 
 test('withDownloadProgress - BYOB readers preserve declared totals until completion', async t => {
 	const events = [];
-	const fetchWithDownloadProgress = withDownloadProgress(async () => new Response(new ReadableStream({
+	const fetchWithDownloadProgress = withDownloadProgress({
+		onProgress(progress) {
+			events.push(progress);
+		},
+	})(async () => new Response(new ReadableStream({
 		type: 'bytes',
 		start(controller) {
 			controller.enqueue(new Uint8Array([0, 1, 2]));
@@ -174,11 +178,7 @@ test('withDownloadProgress - BYOB readers preserve declared totals until complet
 		},
 	}), {
 		headers: {'content-length': '10'},
-	}), {
-		onProgress(progress) {
-			events.push(progress);
-		},
-	});
+	}));
 	const response = await fetchWithDownloadProgress('https://example.com/test');
 	const {done, value} = await readByteStream(response);
 
@@ -199,11 +199,11 @@ test('withDownloadProgress - native encoded responses treat totals as unknown', 
 	const text = 'hello world '.repeat(100);
 	const compressedBody = gzipSync(text);
 	const events = [];
-	const fetchWithDownloadProgress = withDownloadProgress(fetch, {
+	const fetchWithDownloadProgress = withDownloadProgress({
 		onProgress(progress) {
 			events.push(progress);
 		},
-	});
+	})(fetch);
 
 	await withServer((request, response) => {
 		response.writeHead(200, {
@@ -235,13 +235,13 @@ test('withDownloadProgress - wrapped native encoded responses treat totals as un
 	const text = 'hello world '.repeat(100);
 	const compressedBody = gzipSync(text);
 	const events = [];
-	const fetchWithDownloadProgress = withDownloadProgress(withHeaders(fetch, {
-		'x-test': '1',
-	}), {
+	const fetchWithDownloadProgress = withDownloadProgress({
 		onProgress(progress) {
 			events.push(progress);
 		},
-	});
+	})(withHeaders({
+		'x-test': '1',
+	})(fetch));
 
 	await withServer((request, response) => {
 		t.is(request.headers['x-test'], '1');
@@ -272,7 +272,11 @@ test('withDownloadProgress - wrapped native encoded responses treat totals as un
 
 test('withDownloadProgress - mutable encoded responses preserve declared totals', async t => {
 	const events = [];
-	const fetchWithDownloadProgress = withDownloadProgress(async () => new Response(new ReadableStream({
+	const fetchWithDownloadProgress = withDownloadProgress({
+		onProgress(progress) {
+			events.push(progress);
+		},
+	})(async () => new Response(new ReadableStream({
 		type: 'bytes',
 		start(controller) {
 			controller.enqueue(new Uint8Array([0, 1, 2]));
@@ -283,11 +287,7 @@ test('withDownloadProgress - mutable encoded responses preserve declared totals'
 			'content-length': '10',
 			'content-encoding': 'gzip',
 		},
-	}), {
-		onProgress(progress) {
-			events.push(progress);
-		},
-	});
+	}));
 	const response = await fetchWithDownloadProgress('https://example.com/test');
 	const {done, value} = await readByteStream(response);
 
@@ -306,18 +306,18 @@ test('withDownloadProgress - mutable encoded responses preserve declared totals'
 
 test('withDownloadProgress - multi-chunk BYOB readers complete only after the final chunk', async t => {
 	const events = [];
-	const fetchWithDownloadProgress = withDownloadProgress(async () => new Response(new ReadableStream({
+	const fetchWithDownloadProgress = withDownloadProgress({
+		onProgress(progress) {
+			events.push(progress);
+		},
+	})(async () => new Response(new ReadableStream({
 		type: 'bytes',
 		start(controller) {
 			controller.enqueue(new Uint8Array([0, 1]));
 			controller.enqueue(new Uint8Array([2, 3]));
 			controller.close();
 		},
-	})), {
-		onProgress(progress) {
-			events.push(progress);
-		},
-	});
+	})));
 	const response = await fetchWithDownloadProgress('https://example.com/test');
 	const reader = response.body.getReader({mode: 'byob'});
 
@@ -342,9 +342,9 @@ test('withDownloadProgress - multi-chunk BYOB readers complete only after the fi
 });
 
 test('withDownloadProgress - cloned responses preserve byte-stream readers', async t => {
-	const response = await withDownloadProgress(fetch, {
+	const response = await withDownloadProgress({
 		onProgress() {},
-	})('data:application/octet-stream;base64,AAEC');
+	})(fetch)('data:application/octet-stream;base64,AAEC');
 	const clonedResponse = response.clone();
 	const {done, value} = await readByteStream(clonedResponse);
 
@@ -355,11 +355,11 @@ test('withDownloadProgress - cloned responses preserve byte-stream readers', asy
 
 test('withDownloadProgress - consuming a clone first does not duplicate progress events', async t => {
 	const events = [];
-	const response = await withDownloadProgress(fetch, {
+	const response = await withDownloadProgress({
 		onProgress(progress) {
 			events.push(progress);
 		},
-	})('data:text/plain,hello');
+	})(fetch)('data:text/plain,hello');
 	const clonedResponse = response.clone();
 
 	t.is(await clonedResponse.text(), 'hello');
@@ -372,9 +372,9 @@ test('withDownloadProgress - consuming a clone first does not duplicate progress
 });
 
 test('withDownloadProgress - wrapped native fetch responses keep immutable headers', async t => {
-	const response = await withDownloadProgress(fetch, {
+	const response = await withDownloadProgress({
 		onProgress() {},
-	})('data:text/plain,hello');
+	})(fetch)('data:text/plain,hello');
 
 	const error = await t.throwsAsync(async () => {
 		response.headers.set('x-custom', 'value');
@@ -384,17 +384,17 @@ test('withDownloadProgress - wrapped native fetch responses keep immutable heade
 });
 
 test('withDownloadProgress - wrapped native fetch responses keep Headers brand', async t => {
-	const response = await withDownloadProgress(fetch, {
+	const response = await withDownloadProgress({
 		onProgress() {},
-	})('data:text/plain,hello');
+	})(fetch)('data:text/plain,hello');
 
 	t.true(response.headers instanceof Headers);
 });
 
 test('withDownloadProgress - cloned wrapped native fetch responses keep immutable headers', async t => {
-	const response = await withDownloadProgress(fetch, {
+	const response = await withDownloadProgress({
 		onProgress() {},
-	})('data:text/plain,hello');
+	})(fetch)('data:text/plain,hello');
 	const clonedResponse = response.clone();
 
 	const error = await t.throwsAsync(async () => {
@@ -405,20 +405,20 @@ test('withDownloadProgress - cloned wrapped native fetch responses keep immutabl
 });
 
 test('withDownloadProgress - cloned wrapped native fetch responses keep Headers brand', async t => {
-	const response = await withDownloadProgress(fetch, {
+	const response = await withDownloadProgress({
 		onProgress() {},
-	})('data:text/plain,hello');
+	})(fetch)('data:text/plain,hello');
 	const clonedResponse = response.clone();
 
 	t.true(clonedResponse.headers instanceof Headers);
 });
 
 test('withDownloadProgress - wrapped clones keep mutable headers independent', async t => {
-	const response = await withDownloadProgress(async () => new Response('hello', {
-		headers: {'x-custom': 'value'},
-	}), {
+	const response = await withDownloadProgress({
 		onProgress() {},
-	})('https://example.com/test');
+	})(async () => new Response('hello', {
+		headers: {'x-custom': 'value'},
+	}))('https://example.com/test');
 	const clonedResponse = response.clone();
 
 	response.headers.set('x-custom', 'changed');
@@ -428,11 +428,11 @@ test('withDownloadProgress - wrapped clones keep mutable headers independent', a
 });
 
 test('withDownloadProgress - wrapped mutable headers stay connected to response metadata', async t => {
-	const response = await withDownloadProgress(async () => new Response('hello', {
-		headers: {'content-type': 'text/plain'},
-	}), {
+	const response = await withDownloadProgress({
 		onProgress() {},
-	})('https://example.com/test');
+	})(async () => new Response('hello', {
+		headers: {'content-type': 'text/plain'},
+	}))('https://example.com/test');
 
 	response.headers.set('content-type', 'application/json');
 	const blob = await response.blob();
@@ -441,11 +441,11 @@ test('withDownloadProgress - wrapped mutable headers stay connected to response 
 });
 
 test('withDownloadProgress - wrapped mutable clone headers stay connected to clone metadata', async t => {
-	const response = await withDownloadProgress(async () => new Response('hello', {
-		headers: {'content-type': 'text/plain'},
-	}), {
+	const response = await withDownloadProgress({
 		onProgress() {},
-	})('https://example.com/test');
+	})(async () => new Response('hello', {
+		headers: {'content-type': 'text/plain'},
+	}))('https://example.com/test');
 	const clonedResponse = response.clone();
 
 	clonedResponse.headers.set('content-type', 'application/json');
@@ -455,11 +455,11 @@ test('withDownloadProgress - wrapped mutable clone headers stay connected to clo
 });
 
 test('withDownloadProgress - deleting wrapped mutable content-type clears blob metadata', async t => {
-	const response = await withDownloadProgress(async () => new Response('hello', {
-		headers: {'content-type': 'text/plain'},
-	}), {
+	const response = await withDownloadProgress({
 		onProgress() {},
-	})('https://example.com/test');
+	})(async () => new Response('hello', {
+		headers: {'content-type': 'text/plain'},
+	}))('https://example.com/test');
 
 	response.headers.delete('content-type');
 	const blob = await response.blob();
@@ -468,11 +468,11 @@ test('withDownloadProgress - deleting wrapped mutable content-type clears blob m
 });
 
 test('withDownloadProgress - deleting wrapped mutable clone content-type clears clone blob metadata', async t => {
-	const response = await withDownloadProgress(async () => new Response('hello', {
-		headers: {'content-type': 'text/plain'},
-	}), {
+	const response = await withDownloadProgress({
 		onProgress() {},
-	})('https://example.com/test');
+	})(async () => new Response('hello', {
+		headers: {'content-type': 'text/plain'},
+	}))('https://example.com/test');
 	const clonedResponse = response.clone();
 
 	clonedResponse.headers.delete('content-type');
@@ -482,18 +482,18 @@ test('withDownloadProgress - deleting wrapped mutable clone content-type clears 
 });
 
 test('withDownloadProgress - wrapped native fetch responses preserve blob metadata type', async t => {
-	const response = await withDownloadProgress(fetch, {
+	const response = await withDownloadProgress({
 		onProgress() {},
-	})('data:text/plain,hello');
+	})(fetch)('data:text/plain,hello');
 	const blob = await response.blob();
 
 	t.is(blob.type, 'text/plain');
 });
 
 test('withDownloadProgress - cloned wrapped native fetch responses preserve blob metadata type', async t => {
-	const response = await withDownloadProgress(fetch, {
+	const response = await withDownloadProgress({
 		onProgress() {},
-	})('data:text/plain,hello');
+	})(fetch)('data:text/plain,hello');
 	const clonedResponse = response.clone();
 	const blob = await clonedResponse.blob();
 
@@ -502,15 +502,15 @@ test('withDownloadProgress - cloned wrapped native fetch responses preserve blob
 
 test('withDownloadProgress - canceling a wrapped reader cancels the source stream', async t => {
 	let cancellationReason;
-	const fetchWithDownloadProgress = withDownloadProgress(async () => new Response(new ReadableStream({
+	const fetchWithDownloadProgress = withDownloadProgress({
+		onProgress() {},
+	})(async () => new Response(new ReadableStream({
 		type: 'bytes',
 		pull() {},
 		cancel(reason) {
 			cancellationReason = reason;
 		},
-	})), {
-		onProgress() {},
-	});
+	})));
 
 	const response = await fetchWithDownloadProgress('https://example.com/test');
 	const reader = response.body.getReader({mode: 'byob'});
@@ -522,16 +522,16 @@ test('withDownloadProgress - canceling a wrapped reader cancels the source strea
 
 test('withDownloadProgress - canceling a wrapped reader does not report completion', async t => {
 	const events = [];
-	const fetchWithDownloadProgress = withDownloadProgress(async () => new Response(new ReadableStream({
+	const fetchWithDownloadProgress = withDownloadProgress({
+		onProgress(progress) {
+			events.push(progress);
+		},
+	})(async () => new Response(new ReadableStream({
 		type: 'bytes',
 		start(controller) {
 			controller.enqueue(new Uint8Array([0, 1, 2]));
 		},
-	})), {
-		onProgress(progress) {
-			events.push(progress);
-		},
-	});
+	})));
 
 	const response = await fetchWithDownloadProgress('https://example.com/test');
 	const reader = response.body.getReader({mode: 'byob'});
@@ -545,7 +545,9 @@ test('withDownloadProgress - canceling a wrapped reader does not report completi
 
 test('withDownloadProgress - canceling after the first BYOB read does not pull ahead', async t => {
 	let pullCount = 0;
-	const fetchWithDownloadProgress = withDownloadProgress(async () => new Response(new ReadableStream({
+	const fetchWithDownloadProgress = withDownloadProgress({
+		onProgress() {},
+	})(async () => new Response(new ReadableStream({
 		type: 'bytes',
 		pull(controller) {
 			pullCount++;
@@ -554,9 +556,7 @@ test('withDownloadProgress - canceling after the first BYOB read does not pull a
 				controller.enqueue(new Uint8Array([0, 1, 2]));
 			}
 		},
-	})), {
-		onProgress() {},
-	});
+	})));
 
 	const response = await fetchWithDownloadProgress('https://example.com/test');
 	const reader = response.body.getReader({mode: 'byob'});
@@ -588,9 +588,9 @@ test('withDownloadProgress - download response body data is intact after wrappin
 	const half = Math.trunc(content.byteLength / 2);
 	const mockFetch = createStreamingFetch([content.slice(0, half), content.slice(half)], content.byteLength);
 
-	const fetchWithDownloadProgress = withDownloadProgress(mockFetch, {
+	const fetchWithDownloadProgress = withDownloadProgress({
 		onProgress() {},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithDownloadProgress('https://example.com/test');
 
@@ -723,16 +723,16 @@ test('withDownloadProgress - empty streamed responses report completion', async 
 
 test('withDownloadProgress - empty byte-stream responses report completion', async t => {
 	const events = [];
-	const fetchWithDownloadProgress = withDownloadProgress(async () => new Response(new ReadableStream({
+	const fetchWithDownloadProgress = withDownloadProgress({
+		onProgress(progress) {
+			events.push(progress);
+		},
+	})(async () => new Response(new ReadableStream({
 		type: 'bytes',
 		start(controller) {
 			controller.close();
 		},
-	})), {
-		onProgress(progress) {
-			events.push(progress);
-		},
-	});
+	})));
 
 	const response = await fetchWithDownloadProgress('https://example.com/test');
 
@@ -752,7 +752,7 @@ test('withDownloadProgress - passes through unchanged when no callback provided'
 		return new Response('ok', {status: 200});
 	};
 
-	const fetchWithDownloadProgress = withDownloadProgress(simpleFetch);
+	const fetchWithDownloadProgress = withDownloadProgress()(simpleFetch);
 	const response = await fetchWithDownloadProgress('https://example.com/test');
 
 	t.is(callCount, 1);
@@ -764,11 +764,11 @@ test('withDownloadProgress - returns original response when response has no body
 	const noBodyFetch = async () => new Response(null, {status: 204, statusText: 'No Content'});
 	const events = [];
 
-	const fetchWithDownloadProgress = withDownloadProgress(noBodyFetch, {
+	const fetchWithDownloadProgress = withDownloadProgress({
 		onProgress(progress) {
 			events.push(progress);
 		},
-	});
+	})(noBodyFetch);
 
 	const response = await fetchWithDownloadProgress('https://example.com/test');
 
@@ -828,9 +828,9 @@ test('withDownloadProgress - download preserves response status, statusText, and
 		});
 	};
 
-	const fetchWithDownloadProgress = withDownloadProgress(mockFetch, {
+	const fetchWithDownloadProgress = withDownloadProgress({
 		onProgress() {},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithDownloadProgress('https://example.com/test');
 
@@ -841,11 +841,11 @@ test('withDownloadProgress - download preserves response status, statusText, and
 
 test('withDownloadProgress - download preserves response metadata from fetch', async t => {
 	const events = [];
-	const response = await withDownloadProgress(fetch, {
+	const response = await withDownloadProgress({
 		onProgress(progress) {
 			events.push(progress);
 		},
-	})('data:text/plain,hi');
+	})(fetch)('data:text/plain,hi');
 	const clonedResponse = response.clone();
 
 	t.is(response.url, 'data:text/plain,hi');
@@ -861,13 +861,13 @@ test('withDownloadProgress - download preserves response metadata from fetch', a
 });
 
 test('withDownloadProgress - cloned wrapped custom responses preserve status, statusText, and headers', async t => {
-	const response = await withDownloadProgress(async () => new Response('hello', {
+	const response = await withDownloadProgress({
+		onProgress() {},
+	})(async () => new Response('hello', {
 		status: 201,
 		statusText: 'Created',
 		headers: {'x-custom': 'value'},
-	}), {
-		onProgress() {},
-	})('https://example.com/test');
+	}))('https://example.com/test');
 	const clonedResponse = response.clone();
 
 	t.is(clonedResponse.status, 201);
@@ -886,7 +886,7 @@ test('withDownloadProgress - forwards URL and options to underlying fetch', asyn
 		return new Response('ok', {status: 200});
 	};
 
-	const fetchWithDownloadProgress = withDownloadProgress(mockFetch);
+	const fetchWithDownloadProgress = withDownloadProgress()(mockFetch);
 
 	await fetchWithDownloadProgress('https://example.com/test', {
 		method: 'POST',
@@ -900,12 +900,12 @@ test('withDownloadProgress - forwards URL and options to underlying fetch', asyn
 
 test('withDownloadProgress - propagates fetch errors without firing progress events', async t => {
 	const events = [];
-	const fetchWithDownloadProgress = withDownloadProgress(async () => {
-		throw new Error('network failure');
-	}, {
+	const fetchWithDownloadProgress = withDownloadProgress({
 		onProgress(progress) {
 			events.push(progress);
 		},
+	})(async () => {
+		throw new Error('network failure');
 	});
 
 	await t.throwsAsync(
@@ -918,17 +918,17 @@ test('withDownloadProgress - propagates fetch errors without firing progress eve
 
 test('withDownloadProgress - tracks string chunks with correct byte lengths', async t => {
 	const events = [];
-	const fetchWithDownloadProgress = withDownloadProgress(async () => new Response(new ReadableStream({
+	const fetchWithDownloadProgress = withDownloadProgress({
+		onProgress(progress) {
+			events.push(progress);
+		},
+	})(async () => new Response(new ReadableStream({
 		start(controller) {
 			controller.enqueue('hello ');
 			controller.enqueue('世界');
 			controller.close();
 		},
-	})), {
-		onProgress(progress) {
-			events.push(progress);
-		},
-	});
+	})));
 
 	const response = await fetchWithDownloadProgress('https://example.com/test');
 	const reader = response.body.getReader();

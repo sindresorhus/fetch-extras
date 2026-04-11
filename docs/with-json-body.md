@@ -1,13 +1,13 @@
 # withJsonBody
 
-## withJsonBody(fetchFunction)
+## withJsonBody()
 
-Returns a wrapped fetch function that automatically stringifies plain-object and array bodies as JSON and sets the `Content-Type: application/json` header.
+Wraps a fetch function to automatically stringify plain-object and array bodies as JSON and set the `Content-Type: application/json` header.
 
 ```js
 import {withJsonBody} from 'fetch-extras';
 
-const fetchWithJson = withJsonBody(fetch);
+const fetchWithJson = withJsonBody()(fetch);
 
 const response = await fetchWithJson('/api/users', {
 	method: 'POST',
@@ -16,13 +16,9 @@ const response = await fetchWithJson('/api/users', {
 // Sends JSON.stringify({name: 'Alice', age: 30}) with Content-Type: application/json
 ```
 
-## Parameters
-
-- `fetchFunction` (`typeof fetch`) - The fetch function to wrap (usually the global `fetch`).
-
 ## Returns
 
-A wrapped fetch function that auto-serializes JSON bodies.
+A function that accepts a fetch function and returns a wrapped fetch function that auto-serializes JSON bodies.
 
 > [!NOTE]
 > Only plain objects (`{}`) and arrays are auto-serialized. Other body types like strings, `FormData`, `Blob`, and `ReadableStream` are passed through unchanged.
@@ -42,9 +38,9 @@ import {pipeline, withJsonBody, withBaseUrl, withHttpError} from 'fetch-extras';
 
 const apiFetch = pipeline(
 	fetch,
-	f => withBaseUrl(f, 'https://api.example.com'),
-	withJsonBody,
-	withHttpError,
+	withBaseUrl('https://api.example.com'),
+	withJsonBody(),
+	withHttpError(),
 );
 
 const response = await apiFetch('/users', {

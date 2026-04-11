@@ -1,19 +1,18 @@
 # withRateLimit
 
-## withRateLimit(fetchFunction, options)
+## withRateLimit(options)
 
 Wraps a fetch function with client-side rate limiting. Requests that would exceed the limit are queued and delayed until a slot becomes available in the sliding window.
 
 ## Parameters
 
-- `fetchFunction` (`typeof fetch`) - The fetch function to wrap (usually the global `fetch`).
 - `options` (`object`)
   - `requestsPerInterval` (`number`) - Maximum number of requests allowed within the interval.
   - `interval` (`number`) - The sliding window duration in milliseconds.
 
 ## Returns
 
-A wrapped fetch function that enforces the rate limit.
+A function that takes a fetch function and returns a wrapped fetch function that enforces the rate limit.
 
 > [!NOTE]
 > The rate limit state is shared across all calls to the returned function. To rate-limit different hosts independently, create separate `withRateLimit` wrappers.
@@ -27,10 +26,10 @@ A wrapped fetch function that enforces the rate limit.
 import {withRateLimit} from 'fetch-extras';
 
 // Allow at most 10 requests per second
-const rateLimitedFetch = withRateLimit(fetch, {
+const rateLimitedFetch = withRateLimit({
 	requestsPerInterval: 10,
 	interval: 1000,
-});
+})(fetch);
 
 const response = await rateLimitedFetch('/api/data');
 const data = await response.json();
@@ -43,9 +42,9 @@ import {pipeline, withHttpError, withRateLimit, withBaseUrl} from 'fetch-extras'
 
 const apiFetch = pipeline(
 	fetch,
-	f => withBaseUrl(f, 'https://api.example.com'),
-	f => withRateLimit(f, {requestsPerInterval: 10, interval: 1000}),
-	withHttpError,
+	withBaseUrl('https://api.example.com'),
+	withRateLimit({requestsPerInterval: 10, interval: 1000}),
+	withHttpError(),
 );
 
 const response = await apiFetch('/users');

@@ -83,7 +83,7 @@ const createMockFetch = () => {
 
 rateLimitTest('passes through requests within the rate limit', async t => {
 	const mockFetch = createMockFetch();
-	const limitedFetch = withRateLimit(mockFetch, {requestsPerInterval: 3, interval: 1000});
+	const limitedFetch = withRateLimit({requestsPerInterval: 3, interval: 1000})(mockFetch);
 
 	await Promise.all([
 		limitedFetch('/a'),
@@ -94,9 +94,37 @@ rateLimitTest('passes through requests within the rate limit', async t => {
 	t.is(mockFetch.calls.length, 3);
 });
 
+rateLimitTest('reused rate-limit wrapper shares reservations across wrapped fetch functions', async t => {
+	let currentTime = 0;
+	const limit = withRateLimit({requestsPerInterval: 1, interval: 100});
+	const firstFetch = createMockFetch();
+	const secondFetch = createMockFetch();
+	const limitedFetchA = limit(firstFetch);
+	const limitedFetchB = limit(secondFetch);
+
+	await withMockTimers({
+		getDateNow: () => currentTime,
+		getPerformanceNow: () => currentTime,
+	}, async ({runDueTimers}) => {
+		await limitedFetchA('/a');
+
+		const secondRequest = limitedFetchB('/b');
+		await Promise.resolve();
+		t.is(secondFetch.calls.length, 0);
+
+		currentTime = 100;
+		await runDueTimers();
+		await secondRequest;
+	});
+
+	t.is(firstFetch.calls.length, 1);
+	t.is(secondFetch.calls.length, 1);
+	t.true(secondFetch.calls[0].time >= 100);
+});
+
 rateLimitTest('delays requests that exceed the rate limit', async t => {
 	const mockFetch = createMockFetch();
-	const limitedFetch = withRateLimit(mockFetch, {requestsPerInterval: 2, interval: 200});
+	const limitedFetch = withRateLimit({requestsPerInterval: 2, interval: 200})(mockFetch);
 
 	const start = Date.now();
 
@@ -110,7 +138,7 @@ rateLimitTest('delays requests that exceed the rate limit', async t => {
 
 rateLimitTest('allows requests after the window slides', async t => {
 	const mockFetch = createMockFetch();
-	const limitedFetch = withRateLimit(mockFetch, {requestsPerInterval: 2, interval: 100});
+	const limitedFetch = withRateLimit({requestsPerInterval: 2, interval: 100})(mockFetch);
 
 	await limitedFetch('/a');
 	await limitedFetch('/b');
@@ -123,7 +151,7 @@ rateLimitTest('allows requests after the window slides', async t => {
 
 rateLimitTest('respects abort signal while waiting', async t => {
 	const mockFetch = createMockFetch();
-	const limitedFetch = withRateLimit(mockFetch, {requestsPerInterval: 1, interval: 5000});
+	const limitedFetch = withRateLimit({requestsPerInterval: 1, interval: 5000})(mockFetch);
 
 	// Fill the window
 	await limitedFetch('/a');
@@ -140,7 +168,7 @@ rateLimitTest('respects abort signal while waiting', async t => {
 
 rateLimitTest('respects already-aborted signal', async t => {
 	const mockFetch = createMockFetch();
-	const limitedFetch = withRateLimit(mockFetch, {requestsPerInterval: 1, interval: 5000});
+	const limitedFetch = withRateLimit({requestsPerInterval: 1, interval: 5000})(mockFetch);
 
 	// Fill the window
 	await limitedFetch('/a');
@@ -156,7 +184,7 @@ rateLimitTest('respects already-aborted signal', async t => {
 
 rateLimitTest('respects Request signal while waiting when options.signal is absent', async t => {
 	const mockFetch = createMockFetch();
-	const limitedFetch = withRateLimit(mockFetch, {requestsPerInterval: 1, interval: 5000});
+	const limitedFetch = withRateLimit({requestsPerInterval: 1, interval: 5000})(mockFetch);
 
 	await limitedFetch('/a');
 
@@ -174,7 +202,7 @@ rateLimitTest('respects Request signal while waiting when options.signal is abse
 
 rateLimitTest('preserves custom abort reason while waiting', async t => {
 	const mockFetch = createMockFetch();
-	const limitedFetch = withRateLimit(mockFetch, {requestsPerInterval: 1, interval: 5000});
+	const limitedFetch = withRateLimit({requestsPerInterval: 1, interval: 5000})(mockFetch);
 
 	await limitedFetch('/a');
 
@@ -193,7 +221,7 @@ rateLimitTest('preserves custom abort reason while waiting', async t => {
 
 rateLimitTest('aborted request does not consume a rate limit slot', async t => {
 	const mockFetch = createMockFetch();
-	const limitedFetch = withRateLimit(mockFetch, {requestsPerInterval: 1, interval: 200});
+	const limitedFetch = withRateLimit({requestsPerInterval: 1, interval: 200})(mockFetch);
 
 	await limitedFetch('/a');
 
@@ -216,9 +244,8 @@ rateLimitTest('aborted deferred concurrency waits do not consume a rate-limit sl
 		return {ok: true, status: 200, url};
 	};
 
-	const limitedFetch = withConcurrency(
-		withRateLimit(mockFetch, {requestsPerInterval: 2, interval: 1000}),
-		{maxConcurrentRequests: 1},
+	const limitedFetch = withConcurrency({maxConcurrentRequests: 1})(
+		withRateLimit({requestsPerInterval: 2, interval: 1000})(mockFetch),
 	);
 
 	const first = limitedFetch('/a');
@@ -236,7 +263,7 @@ rateLimitTest('aborted deferred concurrency waits do not consume a rate-limit sl
 
 rateLimitTest('aborting after deferred concurrency slot acquisition does not leak a rate-limit reservation', async t => {
 	const mockFetch = createMockFetch();
-	const limitedFetch = withRateLimit(mockFetch, {requestsPerInterval: 1, interval: 100});
+	const limitedFetch = withRateLimit({requestsPerInterval: 1, interval: 100})(mockFetch);
 	const controller = new AbortController();
 
 	const abortedPromise = limitedFetch('/a', {
@@ -266,9 +293,8 @@ rateLimitTest('deferred concurrency waits still limit actual fetch starts per in
 		return {ok: true, status: 200, url};
 	};
 
-	const limitedFetch = withConcurrency(
-		withRateLimit(mockFetch, {requestsPerInterval: 2, interval: 100}),
-		{maxConcurrentRequests: 1},
+	const limitedFetch = withConcurrency({maxConcurrentRequests: 1})(
+		withRateLimit({requestsPerInterval: 2, interval: 100})(mockFetch),
 	);
 
 	await Promise.all([
@@ -284,7 +310,7 @@ rateLimitTest('deferred concurrency waits still limit actual fetch starts per in
 
 rateLimitTest('already-aborted request does not consume an immediately available rate limit slot', async t => {
 	const mockFetch = createMockFetch();
-	const limitedFetch = withRateLimit(mockFetch, {requestsPerInterval: 1, interval: 100});
+	const limitedFetch = withRateLimit({requestsPerInterval: 1, interval: 100})(mockFetch);
 
 	await limitedFetch('/a');
 	await sleep(150);
@@ -318,7 +344,7 @@ rateLimitTest('inner withTimeout applies while waiting for a rate-limit slot', a
 		return {ok: true, status: 200};
 	};
 
-	const limitedFetch = withRateLimit(withTimeout(mockFetch, 50), {requestsPerInterval: 1, interval: 200});
+	const limitedFetch = withRateLimit({requestsPerInterval: 1, interval: 200})(withTimeout(50)(mockFetch));
 
 	await limitedFetch('/a');
 
@@ -351,7 +377,7 @@ rateLimitTest('inner withTimeout shares a single timeout budget across queueing 
 		});
 	};
 
-	const limitedFetch = withRateLimit(withTimeout(mockFetch, 80), {requestsPerInterval: 1, interval: 60});
+	const limitedFetch = withRateLimit({requestsPerInterval: 1, interval: 60})(withTimeout(80)(mockFetch));
 
 	await limitedFetch('/a');
 
@@ -376,7 +402,7 @@ rateLimitTest('preserves FIFO order for queued requests', async t => {
 			return {ok: true, status: 200, url};
 		};
 
-		const limitedFetch = withRateLimit(mockFetch, {requestsPerInterval: 1, interval: 100});
+		const limitedFetch = withRateLimit({requestsPerInterval: 1, interval: 100})(mockFetch);
 
 		await limitedFetch('/a');
 		const secondRequestPromise = limitedFetch('/b');
@@ -412,7 +438,7 @@ rateLimitTest('uses a monotonic clock when the wall clock moves backward', async
 			return {ok: true, status: 200, url};
 		};
 
-		const limitedFetch = withRateLimit(mockFetch, {requestsPerInterval: 1, interval: 100});
+		const limitedFetch = withRateLimit({requestsPerInterval: 1, interval: 100})(mockFetch);
 
 		await limitedFetch('/a');
 		const secondRequestPromise = limitedFetch('/b');
@@ -428,7 +454,7 @@ rateLimitTest('uses a monotonic clock when the wall clock moves backward', async
 
 rateLimitTest('options.signal takes precedence over Request signal', async t => {
 	const mockFetch = createMockFetch();
-	const limitedFetch = withRateLimit(mockFetch, {requestsPerInterval: 1, interval: 100});
+	const limitedFetch = withRateLimit({requestsPerInterval: 1, interval: 100})(mockFetch);
 	const requestController = new AbortController();
 	requestController.abort();
 	const request = new Request('https://example.com', {signal: requestController.signal});
@@ -443,9 +469,9 @@ rateLimitTest('options.signal takes precedence over Request signal', async t => 
 
 rateLimitTest('copyFetchMetadata propagates timeout through withRateLimit', async t => {
 	const mockFetch = async () => new Response(null, {status: 200});
-	const fetchWithTimeout = withTimeout(mockFetch, 5000);
-	const limitedFetch = withRateLimit(fetchWithTimeout, {requestsPerInterval: 1, interval: 100});
-	const outerFetch = withHeaders(limitedFetch, {'X-Test': '1'});
+	const fetchWithTimeout = withTimeout(5000)(mockFetch);
+	const limitedFetch = withRateLimit({requestsPerInterval: 1, interval: 100})(fetchWithTimeout);
+	const outerFetch = withHeaders({'X-Test': '1'})(limitedFetch);
 	const {timeoutDurationSymbol} = await import('../source/utilities.js');
 
 	t.is(outerFetch[timeoutDurationSymbol], 5000);
@@ -453,7 +479,7 @@ rateLimitTest('copyFetchMetadata propagates timeout through withRateLimit', asyn
 
 rateLimitTest('aborting the queued head allows the next queued request to proceed', async t => {
 	const mockFetch = createMockFetch();
-	const limitedFetch = withRateLimit(mockFetch, {requestsPerInterval: 1, interval: 100});
+	const limitedFetch = withRateLimit({requestsPerInterval: 1, interval: 100})(mockFetch);
 
 	await limitedFetch('/a');
 
@@ -475,10 +501,10 @@ rateLimitTest('aborting the queued head allows the next queued request to procee
 
 rateLimitTest('timeout metadata still propagates through outer wrappers', async t => {
 	const mockFetch = async () => new Response(null, {status: 200});
-	const fetchWithTimeout = withTimeout(mockFetch, 5000);
-	const limitedFetch = withRateLimit(fetchWithTimeout, {requestsPerInterval: 1, interval: 100});
-	const wrappedFetch = withHeaders(limitedFetch, {'X-Test': '1'});
-	const outerFetch = withHeaders(wrappedFetch, {'X-Outer': '1'});
+	const fetchWithTimeout = withTimeout(5000)(mockFetch);
+	const limitedFetch = withRateLimit({requestsPerInterval: 1, interval: 100})(fetchWithTimeout);
+	const wrappedFetch = withHeaders({'X-Test': '1'})(limitedFetch);
+	const outerFetch = withHeaders({'X-Outer': '1'})(wrappedFetch);
 	const {timeoutDurationSymbol} = await import('../source/utilities.js');
 
 	t.is(outerFetch[timeoutDurationSymbol], 5000);
@@ -486,7 +512,7 @@ rateLimitTest('timeout metadata still propagates through outer wrappers', async 
 
 rateLimitTest('handles concurrent requests correctly', async t => {
 	const mockFetch = createMockFetch();
-	const limitedFetch = withRateLimit(mockFetch, {requestsPerInterval: 2, interval: 200});
+	const limitedFetch = withRateLimit({requestsPerInterval: 2, interval: 200})(mockFetch);
 
 	const start = Date.now();
 
@@ -504,37 +530,37 @@ rateLimitTest('handles concurrent requests correctly', async t => {
 });
 
 rateLimitTest('throws on non-integer requestsPerInterval', t => {
-	t.throws(() => withRateLimit(fetch, {requestsPerInterval: 2.5, interval: 1000}), {
+	t.throws(() => withRateLimit({requestsPerInterval: 2.5, interval: 1000})(fetch), {
 		instanceOf: TypeError,
 	});
 });
 
 rateLimitTest('throws on zero requestsPerInterval', t => {
-	t.throws(() => withRateLimit(fetch, {requestsPerInterval: 0, interval: 1000}), {
+	t.throws(() => withRateLimit({requestsPerInterval: 0, interval: 1000})(fetch), {
 		instanceOf: TypeError,
 	});
 });
 
 rateLimitTest('throws on negative requestsPerInterval', t => {
-	t.throws(() => withRateLimit(fetch, {requestsPerInterval: -1, interval: 1000}), {
+	t.throws(() => withRateLimit({requestsPerInterval: -1, interval: 1000})(fetch), {
 		instanceOf: TypeError,
 	});
 });
 
 rateLimitTest('throws on zero interval', t => {
-	t.throws(() => withRateLimit(fetch, {requestsPerInterval: 1, interval: 0}), {
+	t.throws(() => withRateLimit({requestsPerInterval: 1, interval: 0})(fetch), {
 		instanceOf: TypeError,
 	});
 });
 
 rateLimitTest('throws on negative interval', t => {
-	t.throws(() => withRateLimit(fetch, {requestsPerInterval: 1, interval: -1000}), {
+	t.throws(() => withRateLimit({requestsPerInterval: 1, interval: -1000})(fetch), {
 		instanceOf: TypeError,
 	});
 });
 
 rateLimitTest('throws on non-finite interval', t => {
-	t.throws(() => withRateLimit(fetch, {requestsPerInterval: 1, interval: Number.POSITIVE_INFINITY}), {
+	t.throws(() => withRateLimit({requestsPerInterval: 1, interval: Number.POSITIVE_INFINITY})(fetch), {
 		instanceOf: TypeError,
 	});
 });
@@ -548,7 +574,7 @@ rateLimitTest('forwards request arguments to the inner fetch', async t => {
 		return {ok: true, status: 200};
 	};
 
-	const limitedFetch = withRateLimit(mockFetch, {requestsPerInterval: 10, interval: 1000});
+	const limitedFetch = withRateLimit({requestsPerInterval: 10, interval: 1000})(mockFetch);
 
 	await limitedFetch('https://example.com/api', {
 		method: 'POST',
@@ -574,7 +600,7 @@ rateLimitTest('fetch errors propagate without corrupting rate limiter state', as
 		return new Response('ok', {status: 200});
 	};
 
-	const limitedFetch = withRateLimit(mockFetch, {requestsPerInterval: 10, interval: 1000});
+	const limitedFetch = withRateLimit({requestsPerInterval: 10, interval: 1000})(mockFetch);
 
 	await limitedFetch('/a');
 	await t.throwsAsync(limitedFetch('/b'), {instanceOf: TypeError, message: 'fetch failed'});
@@ -585,7 +611,7 @@ rateLimitTest('fetch errors propagate without corrupting rate limiter state', as
 
 rateLimitTest('sliding window allows new requests as old ones expire', async t => {
 	const mockFetch = createMockFetch();
-	const limitedFetch = withRateLimit(mockFetch, {requestsPerInterval: 3, interval: 100});
+	const limitedFetch = withRateLimit({requestsPerInterval: 3, interval: 100})(mockFetch);
 
 	// Fill 3 slots
 	await limitedFetch('/a');

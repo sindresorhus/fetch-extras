@@ -80,7 +80,7 @@ const expectConcurrentJson = async (t, fetchFunction, calls, {callCount, respons
 
 test('concurrent GETs to same URL make only one fetch call', async t => {
 	const mockFetch = createDelayedMockFetch();
-	const deduplicatedFetch = withDeduplication(mockFetch);
+	const deduplicatedFetch = withDeduplication()(mockFetch);
 
 	await expectConcurrentJson(t, mockFetch, [
 		deduplicatedFetch('https://example.com/api'),
@@ -90,7 +90,7 @@ test('concurrent GETs to same URL make only one fetch call', async t => {
 
 test('each caller gets an independent response body', async t => {
 	const mockFetch = createDelayedMockFetch();
-	const deduplicatedFetch = withDeduplication(mockFetch);
+	const deduplicatedFetch = withDeduplication()(mockFetch);
 
 	const [response1, response2] = await Promise.all([
 		deduplicatedFetch('https://example.com/api'),
@@ -106,7 +106,7 @@ test('each caller gets an independent response body', async t => {
 
 test('different URLs are not deduplicated', async t => {
 	const mockFetch = createDelayedMockFetch();
-	const deduplicatedFetch = withDeduplication(mockFetch);
+	const deduplicatedFetch = withDeduplication()(mockFetch);
 
 	await Promise.all([
 		deduplicatedFetch('https://example.com/a'),
@@ -118,7 +118,7 @@ test('different URLs are not deduplicated', async t => {
 
 test('non-GET requests pass through without deduplication', async t => {
 	const mockFetch = createDelayedMockFetch();
-	const deduplicatedFetch = withDeduplication(mockFetch);
+	const deduplicatedFetch = withDeduplication()(mockFetch);
 
 	await Promise.all([
 		deduplicatedFetch('https://example.com/api', {method: 'POST'}),
@@ -130,7 +130,7 @@ test('non-GET requests pass through without deduplication', async t => {
 
 test('sequential GETs each make their own fetch call', async t => {
 	const mockFetch = createMockFetch();
-	const deduplicatedFetch = withDeduplication(mockFetch);
+	const deduplicatedFetch = withDeduplication()(mockFetch);
 
 	const response1 = await deduplicatedFetch('https://example.com/api');
 	const data1 = await response1.json();
@@ -143,6 +143,24 @@ test('sequential GETs each make their own fetch call', async t => {
 	t.deepEqual(data2, {callCount: 2});
 });
 
+test('reused deduplication wrapper keeps in-flight state per wrapped fetch function', async t => {
+	const deduplicate = withDeduplication();
+	const firstFetch = createDelayedMockFetch();
+	const secondFetch = createDelayedMockFetch();
+	const deduplicatedFetchA = deduplicate(firstFetch);
+	const deduplicatedFetchB = deduplicate(secondFetch);
+
+	const [responseA, responseB] = await Promise.all([
+		deduplicatedFetchA('https://example.com/api'),
+		deduplicatedFetchB('https://example.com/api'),
+	]);
+
+	t.deepEqual(await responseA.json(), {callCount: 1});
+	t.deepEqual(await responseB.json(), {callCount: 1});
+	t.is(firstFetch.callCount, 1);
+	t.is(secondFetch.callCount, 1);
+});
+
 test('single caller returns the original response without cloning', async t => {
 	let cloneCount = 0;
 	const response = {
@@ -152,7 +170,7 @@ test('single caller returns the original response without cloning', async t => {
 		},
 	};
 
-	const deduplicatedFetch = withDeduplication(async () => response);
+	const deduplicatedFetch = withDeduplication()(async () => response);
 
 	const result = await deduplicatedFetch('https://example.com/api');
 
@@ -172,7 +190,7 @@ test('multiple waiters only clone for additional callers', async t => {
 		},
 	};
 
-	const deduplicatedFetch = withDeduplication(async () => response);
+	const deduplicatedFetch = withDeduplication()(async () => response);
 
 	const [firstResponse, secondResponse, thirdResponse] = await Promise.all([
 		deduplicatedFetch('https://example.com/api'),
@@ -198,7 +216,7 @@ test('error from fetch propagates to all waiters', async t => {
 		throw error;
 	};
 
-	const deduplicatedFetch = withDeduplication(mockFetch);
+	const deduplicatedFetch = withDeduplication()(mockFetch);
 
 	const [error1, error2] = await Promise.all([
 		t.throwsAsync(() => deduplicatedFetch('https://example.com/api')),
@@ -222,7 +240,7 @@ test('error from fetch propagates to every waiter in a larger batch', async t =>
 		throw error;
 	};
 
-	const deduplicatedFetch = withDeduplication(mockFetch);
+	const deduplicatedFetch = withDeduplication()(mockFetch);
 
 	const errors = await Promise.all([
 		t.throwsAsync(() => deduplicatedFetch('https://example.com/api')),
@@ -250,7 +268,7 @@ test('after error, next request starts a fresh fetch', async t => {
 		return new Response('ok', {status: 200});
 	};
 
-	const deduplicatedFetch = withDeduplication(mockFetch);
+	const deduplicatedFetch = withDeduplication()(mockFetch);
 
 	await t.throwsAsync(() => deduplicatedFetch('https://example.com/api'));
 	t.is(callCount, 1);
@@ -262,7 +280,7 @@ test('after error, next request starts a fresh fetch', async t => {
 
 test('Request objects are not deduplicated', async t => {
 	const mockFetch = createDelayedMockFetch();
-	const deduplicatedFetch = withDeduplication(mockFetch);
+	const deduplicatedFetch = withDeduplication()(mockFetch);
 
 	const [response1, response2] = await Promise.all([
 		deduplicatedFetch(new Request('https://example.com/api')),
@@ -278,7 +296,7 @@ test('Request objects are not deduplicated', async t => {
 
 test('URL objects are deduplicated', async t => {
 	const mockFetch = createDelayedMockFetch();
-	const deduplicatedFetch = withDeduplication(mockFetch);
+	const deduplicatedFetch = withDeduplication()(mockFetch);
 
 	await expectConcurrentJson(t, mockFetch, [
 		deduplicatedFetch(new URL('https://example.com/api')),
@@ -288,7 +306,7 @@ test('URL objects are deduplicated', async t => {
 
 test('equivalent absolute URL string and URL object are deduplicated', async t => {
 	const mockFetch = createDelayedMockFetch();
-	const deduplicatedFetch = withDeduplication(mockFetch);
+	const deduplicatedFetch = withDeduplication()(mockFetch);
 
 	await expectConcurrentJson(t, mockFetch, [
 		deduplicatedFetch('https://example.com'),
@@ -298,7 +316,7 @@ test('equivalent absolute URL string and URL object are deduplicated', async t =
 
 test('Request with non-GET method passes through', async t => {
 	const mockFetch = createDelayedMockFetch();
-	const deduplicatedFetch = withDeduplication(mockFetch);
+	const deduplicatedFetch = withDeduplication()(mockFetch);
 
 	await Promise.all([
 		deduplicatedFetch(new Request('https://example.com/api', {method: 'POST'})),
@@ -310,7 +328,7 @@ test('Request with non-GET method passes through', async t => {
 
 test('strips fragment from URL for deduplication key', async t => {
 	const mockFetch = createDelayedMockFetch();
-	const deduplicatedFetch = withDeduplication(mockFetch);
+	const deduplicatedFetch = withDeduplication()(mockFetch);
 
 	const [response1, response2] = await Promise.all([
 		deduplicatedFetch('https://example.com/api#foo'),
@@ -328,8 +346,8 @@ test('works with withBaseUrl', async t => {
 	const mockFetch = createDelayedMockFetch();
 	const deduplicatedFetch = pipeline(
 		mockFetch,
-		f => withBaseUrl(f, 'https://example.com'),
-		withDeduplication,
+		withBaseUrl('https://example.com'),
+		withDeduplication(),
 	);
 
 	await expectConcurrentJson(t, mockFetch, [
@@ -342,7 +360,7 @@ test('preserves custom URL resolution metadata for outer wrappers', async t => {
 	const {resolveRequestUrlSymbol} = await import('../source/utilities.js');
 	const mockFetch = createDelayedMockFetch();
 	mockFetch[resolveRequestUrlSymbol] = urlOrRequest => new URL(urlOrRequest, 'https://example.com');
-	const deduplicatedFetch = withHttpError(withDeduplication(mockFetch));
+	const deduplicatedFetch = withHttpError()(withDeduplication()(mockFetch));
 
 	await expectConcurrentJson(t, mockFetch, [
 		deduplicatedFetch('/api'),
@@ -352,7 +370,7 @@ test('preserves custom URL resolution metadata for outer wrappers', async t => {
 
 test('explicit {method: "GET"} is not deduplicated', async t => {
 	const mockFetch = createDelayedMockFetch();
-	const deduplicatedFetch = withDeduplication(mockFetch);
+	const deduplicatedFetch = withDeduplication()(mockFetch);
 
 	await expectConcurrentJson(t, mockFetch, [
 		deduplicatedFetch('https://example.com/api', {method: 'GET'}),
@@ -362,7 +380,7 @@ test('explicit {method: "GET"} is not deduplicated', async t => {
 
 test('lowercase method in RequestInit is not deduplicated', async t => {
 	const mockFetch = createDelayedMockFetch();
-	const deduplicatedFetch = withDeduplication(mockFetch);
+	const deduplicatedFetch = withDeduplication()(mockFetch);
 
 	await expectConcurrentJson(t, mockFetch, [
 		deduplicatedFetch('https://example.com/api', {method: 'get'}),
@@ -372,7 +390,7 @@ test('lowercase method in RequestInit is not deduplicated', async t => {
 
 test('different query parameters are not deduplicated', async t => {
 	const mockFetch = createDelayedMockFetch();
-	const deduplicatedFetch = withDeduplication(mockFetch);
+	const deduplicatedFetch = withDeduplication()(mockFetch);
 
 	await Promise.all([
 		deduplicatedFetch('https://example.com/api?page=1'),
@@ -384,7 +402,7 @@ test('different query parameters are not deduplicated', async t => {
 
 test('string URL and Request with same URL are not deduplicated', async t => {
 	const mockFetch = createDelayedMockFetch();
-	const deduplicatedFetch = withDeduplication(mockFetch);
+	const deduplicatedFetch = withDeduplication()(mockFetch);
 
 	await expectConcurrentJson(t, mockFetch, [
 		deduplicatedFetch('https://example.com/api'),
@@ -394,7 +412,7 @@ test('string URL and Request with same URL are not deduplicated', async t => {
 
 test('GET requests with RequestInit are not deduplicated', async t => {
 	const mockFetch = createDelayedMockFetch();
-	const deduplicatedFetch = withDeduplication(mockFetch);
+	const deduplicatedFetch = withDeduplication()(mockFetch);
 
 	await expectConcurrentJson(t, mockFetch, [
 		deduplicatedFetch('https://example.com/api', {cache: 'reload'}),
@@ -404,7 +422,7 @@ test('GET requests with RequestInit are not deduplicated', async t => {
 
 test('explicit empty RequestInit is deduplicated', async t => {
 	const mockFetch = createDelayedMockFetch();
-	const deduplicatedFetch = withDeduplication(mockFetch);
+	const deduplicatedFetch = withDeduplication()(mockFetch);
 
 	await expectConcurrentJson(t, mockFetch, [
 		deduplicatedFetch('https://example.com/api', {}),
@@ -414,8 +432,8 @@ test('explicit empty RequestInit is deduplicated', async t => {
 
 test('withTimeout preserves timeout semantics for concurrent callers', async t => {
 	const slowFetch = createAbortableDelayedFetch(100);
-	const deduplicatedFetch = withDeduplication(slowFetch);
-	const fetchWithTimeout = withTimeout(deduplicatedFetch, 10);
+	const deduplicatedFetch = withDeduplication()(slowFetch);
+	const fetchWithTimeout = withTimeout(10)(deduplicatedFetch);
 
 	await t.throwsAsync(() => Promise.all([
 		fetchWithTimeout('https://example.com/api'),
@@ -427,7 +445,7 @@ test('withTimeout preserves timeout semantics for concurrent callers', async t =
 
 test('works through withHttpError wrapper normalization', async t => {
 	const mockFetch = createDelayedMockFetch();
-	const deduplicatedFetch = withHttpError(withDeduplication(mockFetch));
+	const deduplicatedFetch = withHttpError()(withDeduplication()(mockFetch));
 
 	await expectConcurrentJson(t, mockFetch, [
 		deduplicatedFetch('https://example.com/api'),
@@ -437,7 +455,7 @@ test('works through withHttpError wrapper normalization', async t => {
 
 test('explicit empty RequestInit stays transparent through withHttpError normalization', async t => {
 	const mockFetch = createDelayedMockFetch();
-	const deduplicatedFetch = withHttpError(withDeduplication(mockFetch));
+	const deduplicatedFetch = withHttpError()(withDeduplication()(mockFetch));
 
 	await expectConcurrentJson(t, mockFetch, [
 		deduplicatedFetch('https://example.com/api', {}),
@@ -447,8 +465,8 @@ test('explicit empty RequestInit stays transparent through withHttpError normali
 
 test('inner timeouts disable deduplication so each call keeps its own timeout budget', async t => {
 	const slowFetch = createAbortableDelayedFetch(200);
-	const timedFetch = withTimeout(slowFetch, 80);
-	const deduplicatedFetch = withDeduplication(timedFetch);
+	const timedFetch = withTimeout(80)(slowFetch);
+	const deduplicatedFetch = withDeduplication()(timedFetch);
 	const startedAt = performance.now();
 
 	const firstRequest = t.throwsAsync(() => deduplicatedFetch('https://example.com/api'), {name: 'AbortError'});
@@ -468,8 +486,8 @@ test('preserves timeout metadata for outer wrappers', async t => {
 	const {timeoutDurationSymbol} = await import('../source/utilities.js');
 	const mockFetch = async () => new Response('ok');
 	mockFetch[timeoutDurationSymbol] = 5000;
-	const deduplicatedFetch = withDeduplication(mockFetch);
-	const outerFetch = withHttpError(deduplicatedFetch);
+	const deduplicatedFetch = withDeduplication()(mockFetch);
+	const outerFetch = withHttpError()(deduplicatedFetch);
 
 	t.is(deduplicatedFetch[timeoutDurationSymbol], 5000);
 	t.is(outerFetch[timeoutDurationSymbol], 5000);
@@ -477,7 +495,7 @@ test('preserves timeout metadata for outer wrappers', async t => {
 
 test('non-OK responses are still deduplicated', async t => {
 	const mockFetch = createDelayedMockFetch({status: 500});
-	const deduplicatedFetch = withDeduplication(mockFetch);
+	const deduplicatedFetch = withDeduplication()(mockFetch);
 
 	const [response1, response2] = await Promise.all([
 		deduplicatedFetch('https://example.com/api'),
@@ -491,7 +509,7 @@ test('non-OK responses are still deduplicated', async t => {
 
 test('many concurrent requests all deduplicated', async t => {
 	const mockFetch = createDelayedMockFetch();
-	const deduplicatedFetch = withDeduplication(mockFetch);
+	const deduplicatedFetch = withDeduplication()(mockFetch);
 
 	const responses = await Promise.all(
 		Array.from({length: 10}, () => deduplicatedFetch('https://example.com/api')),
@@ -507,7 +525,7 @@ test('many concurrent requests all deduplicated', async t => {
 
 test('relative path strings are deduplicated using the raw string as key', async t => {
 	const mockFetch = createDelayedMockFetch();
-	const deduplicatedFetch = withDeduplication(mockFetch);
+	const deduplicatedFetch = withDeduplication()(mockFetch);
 
 	const [response1, response2] = await Promise.all([
 		deduplicatedFetch('/api/users'),

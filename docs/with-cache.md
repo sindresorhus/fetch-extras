@@ -1,6 +1,6 @@
 # withCache
 
-## withCache(fetchFunction, options)
+## withCache(options)
 
 Wraps a fetch function with in-memory caching for plain unconditional GET requests.
 
@@ -12,13 +12,12 @@ This is a small in-memory cache, not a full HTTP cache. It memoizes plain uncond
 
 ## Parameters
 
-- `fetchFunction` (`typeof fetch`) - The fetch function to wrap (usually the global `fetch`).
 - `options` (`object`)
   - `ttl` (`number`) - Time-to-live in milliseconds. Cached responses older than this are discarded and re-fetched.
 
 ## Returns
 
-A wrapped fetch function that caches GET responses.
+A function that takes a fetch function and returns a wrapped fetch function that caches GET responses.
 
 > [!NOTE]
 > The cache key is the URL only, so `withCache()` only caches plain unconditional GET requests in the default fetch mode. If a GET request carries any explicit or inherited headers, including auth, cookies, or validators like `If-None-Match`, or it changes request metadata like `credentials`, `integrity`, `mode`, `redirect`, `referrer`, or `referrerPolicy`, it is treated as uncacheable and bypasses this wrapper's in-memory cache. With `cache: 'only-if-cached'`, that still means a cache miss and the wrapper returns its synthetic `504` response.
@@ -34,7 +33,7 @@ A wrapped fetch function that caches GET responses.
 ```js
 import {withCache} from 'fetch-extras';
 
-const cachedFetch = withCache(fetch, {ttl: 60_000});
+const cachedFetch = withCache({ttl: 60_000})(fetch);
 
 const response = await cachedFetch('https://api.example.com/data');
 const data = await response.json();
@@ -50,9 +49,9 @@ import {pipeline, withHttpError, withCache, withBaseUrl} from 'fetch-extras';
 
 const apiFetch = pipeline(
 	fetch,
-	f => withBaseUrl(f, 'https://api.example.com'),
-	f => withCache(f, {ttl: 30_000}),
-	withHttpError,
+	withBaseUrl('https://api.example.com'),
+	withCache({ttl: 30_000}),
+	withHttpError(),
 );
 
 const response = await apiFetch('/users');

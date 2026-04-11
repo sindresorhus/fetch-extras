@@ -1,6 +1,6 @@
 # withRetry
 
-## withRetry(fetchFunction, options?)
+## withRetry(options?)
 
 Wraps a fetch function to automatically retry failed requests.
 
@@ -10,7 +10,6 @@ When all retries are exhausted, the last response is returned (for HTTP status r
 
 ## Parameters
 
-- `fetchFunction` (`typeof fetch`) - The fetch function to wrap (usually the global `fetch`).
 - `options` (`object`)
   - `retries` (`number`) - Number of retries after the initial attempt. `retries: 2` means up to 3 total attempts. Default: `2`.
   - `methods` (`string[]`) - HTTP methods to retry. Non-matching methods pass through without retry. Default: `['GET', 'HEAD', 'PUT', 'DELETE', 'OPTIONS', 'TRACE']`.
@@ -21,7 +20,7 @@ When all retries are exhausted, the last response is returned (for HTTP status r
 
 ## Returns
 
-A wrapped fetch function with automatic retry.
+A function that takes a fetch function and returns a wrapped fetch function with automatic retry.
 
 > [!NOTE]
 > POST and PATCH are not retried by default because they are not idempotent. Add them to `methods` if your endpoints are safe to retry.
@@ -41,7 +40,7 @@ A wrapped fetch function with automatic retry.
 ```js
 import {withRetry} from 'fetch-extras';
 
-const fetchWithRetry = withRetry(fetch, {retries: 3});
+const fetchWithRetry = withRetry({retries: 3})(fetch);
 
 const response = await fetchWithRetry('https://api.example.com/data');
 const data = await response.json();
@@ -52,14 +51,14 @@ With a custom backoff and conditional retry:
 ```js
 import {withRetry} from 'fetch-extras';
 
-const fetchWithRetry = withRetry(fetch, {
+const fetchWithRetry = withRetry({
 	retries: 5,
 	backoff: attemptNumber => attemptNumber * 1000, // Linear: 1s, 2s, 3s, ...
 	shouldRetry({response}) {
 		// Don't retry if the server says the resource is gone
 		return response?.status !== 410;
 	},
-});
+})(fetch);
 ```
 
 Can be combined with other `with*` functions:
@@ -69,10 +68,10 @@ import {pipeline, withHttpError, withRetry, withBaseUrl, withTimeout} from 'fetc
 
 const apiFetch = pipeline(
 	fetch,
-	f => withTimeout(f, 10_000),
-	f => withBaseUrl(f, 'https://api.example.com'),
-	f => withRetry(f, {retries: 2}),
-	withHttpError,
+	withTimeout(10_000),
+	withBaseUrl('https://api.example.com'),
+	withRetry({retries: 2}),
+	withHttpError(),
 );
 
 const response = await apiFetch('/users');

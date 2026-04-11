@@ -28,11 +28,13 @@ export function throwIfHttpError(responseOrPromise) {
 	return responseOrPromise;
 }
 
-export function withHttpError(fetchFunction) {
-	const fetchWithHttpError = async (urlOrRequest, options = {}) => {
-		const response = await fetchFunction(urlOrRequest, options);
-		return throwIfHttpError(response);
-	};
+export function withHttpError() {
+	return fetchFunction => {
+		const fetchWithHttpError = async (urlOrRequest, options = {}) => {
+			const response = await fetchFunction(urlOrRequest, options);
+			return throwIfHttpError(response);
+		};
 
-	return copyFetchMetadata(fetchWithHttpError, fetchFunction);
+		return copyFetchMetadata(fetchWithHttpError, fetchFunction);
+	};
 }

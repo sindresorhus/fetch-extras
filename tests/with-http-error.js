@@ -17,7 +17,7 @@ const createBasicMockFetch = () => async url => {
 
 test('withHttpError - should pass through successful responses', async t => {
 	const mockFetch = createBasicMockFetch();
-	const fetchWithError = withHttpError(mockFetch);
+	const fetchWithError = withHttpError()(mockFetch);
 
 	const response = await fetchWithError('/ok');
 	t.true(response.ok);
@@ -27,7 +27,7 @@ test('withHttpError - should pass through successful responses', async t => {
 
 test('withHttpError - should throw HttpError for error responses', async t => {
 	const mockFetch = createBasicMockFetch();
-	const fetchWithError = withHttpError(mockFetch);
+	const fetchWithError = withHttpError()(mockFetch);
 
 	const error = await t.throwsAsync(fetchWithError('/not-found'), {instanceOf: HttpError});
 	t.is(error.response.status, 404);
@@ -39,7 +39,7 @@ test('withHttpError - throws HttpError even with timeout', async t => {
 		statusText: 'Internal Server Error',
 	});
 
-	const fetchWithTimeoutAndError = withHttpError(withTimeout(mockFetch, 1000));
+	const fetchWithTimeoutAndError = withHttpError()(withTimeout(1000)(mockFetch));
 
 	const error = await t.throwsAsync(fetchWithTimeoutAndError('/test'), {instanceOf: HttpError});
 	t.is(error.response.status, 500);

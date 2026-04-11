@@ -22,10 +22,10 @@ import {pipeline, withBaseUrl, withHeaders, withHttpError, withTimeout} from 'fe
 
 const apiFetch = pipeline(
 	fetch,
-	f => withTimeout(f, 5000),
-	f => withBaseUrl(f, 'https://api.example.com'),
-	f => withHeaders(f, {Authorization: 'Bearer token'}),
-	withHttpError,
+	withTimeout(5000),
+	withBaseUrl('https://api.example.com'),
+	withHeaders({Authorization: 'Bearer token'}),
+	withHttpError(),
 );
 
 const response = await apiFetch('/users');
@@ -35,15 +35,19 @@ const data = await response.json();
 Equivalent nested form:
 
 ```js
-const apiFetch = withHttpError(
-	withHeaders(
-		withBaseUrl(
-			withTimeout(fetch, 5000),
-			'https://api.example.com',
+const apiFetch = withHttpError()(
+	withHeaders({Authorization: 'Bearer token'})(
+		withBaseUrl('https://api.example.com')(
+			withTimeout(5000)(fetch),
 		),
-		{Authorization: 'Bearer token'},
 	),
 );
 ```
 
 Without `pipeline()`, the same composition would need nested `with*` calls.
+
+## FAQ
+
+### Why do I need to pass `fetch` explicitly?
+
+Because `pipeline()` is a generic utility, not a fetch-specific one. Passing `fetch` explicitly keeps the starting point obvious and avoids special-casing `globalThis.fetch`.

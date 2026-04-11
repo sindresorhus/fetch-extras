@@ -60,7 +60,7 @@ async function expectJsonSyntaxError(t, fetchFunction, options = {}) {
 
 test('returns parsed JSON without schema', async t => {
 	const mockFetch = createMockFetch({name: 'Alice', age: 30});
-	const fetchJson = withJsonResponse(mockFetch);
+	const fetchJson = withJsonResponse()(mockFetch);
 
 	const result = await fetchJson('/api/user');
 	t.deepEqual(result, {name: 'Alice', age: 30});
@@ -68,7 +68,7 @@ test('returns parsed JSON without schema', async t => {
 
 test('returns parsed JSON array without schema', async t => {
 	const mockFetch = createMockFetch([1, 2, 3]);
-	const fetchJson = withJsonResponse(mockFetch);
+	const fetchJson = withJsonResponse()(mockFetch);
 
 	const result = await fetchJson('/api/items');
 	t.deepEqual(result, [1, 2, 3]);
@@ -77,7 +77,7 @@ test('returns parsed JSON array without schema', async t => {
 test('validates JSON response with schema and returns validated value', async t => {
 	const mockFetch = createMockFetch({name: 'Alice', age: 30});
 	const schema = createPassthroughSchema();
-	const fetchWithSchema = withJsonResponse(mockFetch, {schema});
+	const fetchWithSchema = withJsonResponse({schema})(mockFetch);
 
 	const result = await fetchWithSchema('/api/user');
 	t.deepEqual(result, {name: 'Alice', age: 30});
@@ -86,7 +86,7 @@ test('validates JSON response with schema and returns validated value', async t 
 test('schema can transform the value', async t => {
 	const mockFetch = createMockFetch({name: 'Alice', age: '30'});
 	const schema = createMockSchema(value => ({value: {...value, age: Number(value.age)}}));
-	const fetchWithSchema = withJsonResponse(mockFetch, {schema});
+	const fetchWithSchema = withJsonResponse({schema})(mockFetch);
 
 	const result = await fetchWithSchema('/api/user');
 	t.deepEqual(result, {name: 'Alice', age: 30});
@@ -96,7 +96,7 @@ test('throws SchemaValidationError on validation failure', async t => {
 	const mockFetch = createMockFetch({name: 123});
 	const issues = [{message: 'Expected string, received number', path: ['name']}];
 	const schema = createFailingSchema(issues);
-	const fetchWithSchema = withJsonResponse(mockFetch, {schema});
+	const fetchWithSchema = withJsonResponse({schema})(mockFetch);
 
 	const error = await t.throwsAsync(fetchWithSchema('/api/user'), {
 		instanceOf: SchemaValidationError,
@@ -121,7 +121,7 @@ test('SchemaValidationError is instanceof Error', t => {
 test('works with async schema validators', async t => {
 	const mockFetch = createMockFetch({id: 1});
 	const schema = createMockSchema(async value => ({value}));
-	const fetchWithSchema = withJsonResponse(mockFetch, {schema});
+	const fetchWithSchema = withJsonResponse({schema})(mockFetch);
 
 	const result = await fetchWithSchema('/api/item');
 	t.deepEqual(result, {id: 1});
@@ -130,7 +130,7 @@ test('works with async schema validators', async t => {
 test('throws TypeError for non-object schema', t => {
 	const mockFetch = createMockFetch({});
 
-	t.throws(() => withJsonResponse(mockFetch, {schema: 'not a schema'}), {
+	t.throws(() => withJsonResponse({schema: 'not a schema'})(mockFetch), {
 		instanceOf: TypeError,
 		message: /Standard Schema/,
 	});
@@ -139,7 +139,7 @@ test('throws TypeError for non-object schema', t => {
 test('throws TypeError for null schema', t => {
 	const mockFetch = createMockFetch({});
 
-	t.throws(() => withJsonResponse(mockFetch, {schema: null}), {
+	t.throws(() => withJsonResponse({schema: null})(mockFetch), {
 		instanceOf: TypeError,
 		message: /Standard Schema/,
 	});
@@ -148,7 +148,7 @@ test('throws TypeError for null schema', t => {
 test('throws TypeError for object without ~standard property', t => {
 	const mockFetch = createMockFetch({});
 
-	t.throws(() => withJsonResponse(mockFetch, {schema: {}}), {
+	t.throws(() => withJsonResponse({schema: {}})(mockFetch), {
 		instanceOf: TypeError,
 		message: /Standard Schema/,
 	});
@@ -157,7 +157,7 @@ test('throws TypeError for object without ~standard property', t => {
 test('throws TypeError for object with invalid ~standard property', t => {
 	const mockFetch = createMockFetch({});
 
-	t.throws(() => withJsonResponse(mockFetch, {schema: {'~standard': 'invalid'}}), {
+	t.throws(() => withJsonResponse({schema: {'~standard': 'invalid'}})(mockFetch), {
 		instanceOf: TypeError,
 		message: /Standard Schema/,
 	});
@@ -167,7 +167,7 @@ test('throws TypeError for schema without validate function', t => {
 	const mockFetch = createMockFetch({});
 	const schema = {'~standard': {version: 1, vendor: 'test'}};
 
-	t.throws(() => withJsonResponse(mockFetch, {schema}), {
+	t.throws(() => withJsonResponse({schema})(mockFetch), {
 		instanceOf: TypeError,
 		message: /Standard Schema/,
 	});
@@ -181,7 +181,7 @@ test('forwards request options to the underlying fetch', async t => {
 		return new Response(JSON.stringify({ok: true}));
 	};
 
-	const fetchJson = withJsonResponse(mockFetch);
+	const fetchJson = withJsonResponse()(mockFetch);
 	const result = await fetchJson('/api/user', {method: 'POST', headers: {'x-custom': 'value'}});
 	t.deepEqual(result, {ok: true});
 });
@@ -192,27 +192,27 @@ test('works with Request object as input', async t => {
 		return new Response(JSON.stringify({id: 42}));
 	};
 
-	const fetchJson = withJsonResponse(mockFetch);
+	const fetchJson = withJsonResponse()(mockFetch);
 	const result = await fetchJson(new Request('https://example.com/api'));
 	t.deepEqual(result, {id: 42});
 });
 
 test('works with null JSON value', async t => {
 	const mockFetch = async () => new Response('null');
-	const fetchJson = withJsonResponse(mockFetch);
+	const fetchJson = withJsonResponse()(mockFetch);
 
 	const result = await fetchJson('/api');
 	t.is(result, null);
 });
 
 test('works with primitive JSON values', async t => {
-	const fetchJson = withJsonResponse(async () => new Response(JSON.stringify(42)));
+	const fetchJson = withJsonResponse()(async () => new Response(JSON.stringify(42)));
 	t.is(await fetchJson('/api'), 42);
 
-	const fetchString = withJsonResponse(async () => new Response(JSON.stringify('hello')));
+	const fetchString = withJsonResponse()(async () => new Response(JSON.stringify('hello')));
 	t.is(await fetchString('/api'), 'hello');
 
-	const fetchBool = withJsonResponse(async () => new Response(JSON.stringify(true)));
+	const fetchBool = withJsonResponse()(async () => new Response(JSON.stringify(true)));
 	t.is(await fetchBool('/api'), true);
 });
 
@@ -220,7 +220,7 @@ test('SchemaValidationError exposes response url and status', async t => {
 	const mockFetch = createMockFetch({name: 123}, {status: 200});
 	const issues = [{message: 'Expected string'}];
 	const schema = createFailingSchema(issues);
-	const fetchWithSchema = withJsonResponse(mockFetch, {schema});
+	const fetchWithSchema = withJsonResponse({schema})(mockFetch);
 
 	const error = await t.throwsAsync(fetchWithSchema('https://example.com/api/user'), {
 		instanceOf: SchemaValidationError,
@@ -232,7 +232,7 @@ test('SchemaValidationError exposes response url and status', async t => {
 
 test('throws SyntaxError for non-JSON response', async t => {
 	const mockFetch = async () => new Response('<html>Not Found</html>');
-	const fetchJson = withJsonResponse(mockFetch);
+	const fetchJson = withJsonResponse()(mockFetch);
 
 	await t.throwsAsync(fetchJson('/api'), {
 		instanceOf: SyntaxError,
@@ -242,7 +242,7 @@ test('throws SyntaxError for non-JSON response', async t => {
 for (const {title, createFetch, options, checkError} of noBodyResponseCases) {
 	test(`throws SyntaxError for ${title}`, async t => {
 		const fetchFunction = createFetch(t);
-		const error = await expectJsonSyntaxError(t, withJsonResponse(fetchFunction), options);
+		const error = await expectJsonSyntaxError(t, withJsonResponse()(fetchFunction), options);
 		checkError?.(t, error);
 	});
 }
@@ -250,7 +250,7 @@ for (const {title, createFetch, options, checkError} of noBodyResponseCases) {
 for (const {title, createFetch, options} of noBodyResponseCases) {
 	test(`${title} throws before schema validation`, async t => {
 		const fetchFunction = createFetch(t);
-		const fetchWithSchema = withJsonResponse(fetchFunction, {schema: createNoBodySchema(t)});
+		const fetchWithSchema = withJsonResponse({schema: createNoBodySchema(t)})(fetchFunction);
 
 		await expectJsonSyntaxError(t, fetchWithSchema, options);
 	});
@@ -260,7 +260,7 @@ test('async schema validation failure', async t => {
 	const mockFetch = createMockFetch({name: 123});
 	const issues = [{message: 'Expected string', path: ['name']}];
 	const schema = createMockSchema(async () => ({issues}));
-	const fetchWithSchema = withJsonResponse(mockFetch, {schema});
+	const fetchWithSchema = withJsonResponse({schema})(mockFetch);
 
 	const error = await t.throwsAsync(fetchWithSchema('/api/user'), {
 		instanceOf: SchemaValidationError,
@@ -274,7 +274,7 @@ test('preserves fetch metadata through wrapper', async t => {
 	const mockFetch = createMockFetch({});
 	mockFetch[timeoutDurationSymbol] = 5000;
 
-	const fetchJson = withJsonResponse(mockFetch);
+	const fetchJson = withJsonResponse()(mockFetch);
 	t.is(fetchJson[timeoutDurationSymbol], 5000);
 });
 
@@ -285,7 +285,7 @@ test('wrapped function can be called multiple times', async t => {
 		return new Response(JSON.stringify({count: callCount}));
 	};
 
-	const fetchJson = withJsonResponse(mockFetch);
+	const fetchJson = withJsonResponse()(mockFetch);
 	t.deepEqual(await fetchJson('/api'), {count: 1});
 	t.deepEqual(await fetchJson('/api'), {count: 2});
 	t.deepEqual(await fetchJson('/api'), {count: 3});
@@ -296,7 +296,7 @@ test('propagates fetch errors', async t => {
 		throw new TypeError('Failed to fetch');
 	};
 
-	const fetchJson = withJsonResponse(mockFetch);
+	const fetchJson = withJsonResponse()(mockFetch);
 	await t.throwsAsync(fetchJson('/api'), {
 		instanceOf: TypeError,
 		message: 'Failed to fetch',
@@ -308,7 +308,7 @@ test('propagates errors thrown by the schema validator', async t => {
 	const schema = createMockSchema(() => {
 		throw new Error('Validator crashed');
 	});
-	const fetchWithSchema = withJsonResponse(mockFetch, {schema});
+	const fetchWithSchema = withJsonResponse({schema})(mockFetch);
 
 	await t.throwsAsync(fetchWithSchema('/api'), {
 		message: 'Validator crashed',
@@ -323,7 +323,7 @@ test('preserves multiple validation issues', async t => {
 		{message: 'Missing field', path: ['email']},
 	];
 	const schema = createFailingSchema(issues);
-	const fetchWithSchema = withJsonResponse(mockFetch, {schema});
+	const fetchWithSchema = withJsonResponse({schema})(mockFetch);
 
 	const error = await t.throwsAsync(fetchWithSchema('/api'), {
 		instanceOf: SchemaValidationError,
@@ -336,7 +336,7 @@ test('preserves multiple validation issues', async t => {
 test('schema can strip extra fields from the value', async t => {
 	const mockFetch = createMockFetch({name: 'Alice', age: 30, extra: 'field'});
 	const schema = createMockSchema(value => ({value: {name: value.name, age: value.age}}));
-	const fetchWithSchema = withJsonResponse(mockFetch, {schema});
+	const fetchWithSchema = withJsonResponse({schema})(mockFetch);
 
 	const result = await fetchWithSchema('/api/user');
 	t.deepEqual(result, {name: 'Alice', age: 30});
@@ -344,7 +344,7 @@ test('schema can strip extra fields from the value', async t => {
 
 test('empty options object behaves like no schema', async t => {
 	const mockFetch = createMockFetch({id: 1});
-	const fetchJson = withJsonResponse(mockFetch, {});
+	const fetchJson = withJsonResponse({})(mockFetch);
 
 	const result = await fetchJson('/api');
 	t.deepEqual(result, {id: 1});
@@ -367,7 +367,7 @@ test('works with callable schema objects', async t => {
 			},
 		},
 	);
-	const fetchWithSchema = withJsonResponse(mockFetch, {schema});
+	const fetchWithSchema = withJsonResponse({schema})(mockFetch);
 
 	const result = await fetchWithSchema('/api/user');
 	t.deepEqual(result, {name: 'Alice'});

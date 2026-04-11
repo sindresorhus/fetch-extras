@@ -45,20 +45,7 @@ const assertPublicTokenRefreshHookResponse = async (t, retryStatus) => {
 	const seenStatuses = [];
 	const seenOptionAuthorizations = [];
 
-	const fetchWithHooks = withHooks(withTokenRefresh(async (_url, options = {}) => {
-		fetchCallCount++;
-		const authorization = new Headers(options.headers).get('Authorization');
-
-		if (authorization === 'Bearer refreshed-token') {
-			return new Response(null, {status: retryStatus});
-		}
-
-		return new Response(null, {status: 401});
-	}, {
-		async refreshToken() {
-			return 'refreshed-token';
-		},
-	}), {
+	const fetchWithHooks = withHooks({
 		beforeRequest({options}) {
 			beforeRequestCount++;
 			seenOptionAuthorizations.push(new Headers(options.headers).get('Authorization'));
@@ -68,7 +55,20 @@ const assertPublicTokenRefreshHookResponse = async (t, retryStatus) => {
 			seenStatuses.push(response.status);
 			seenOptionAuthorizations.push(new Headers(options.headers).get('Authorization'));
 		},
-	});
+	})(withTokenRefresh({
+		async refreshToken() {
+			return 'refreshed-token';
+		},
+	})(async (_url, options = {}) => {
+		fetchCallCount++;
+		const authorization = new Headers(options.headers).get('Authorization');
+
+		if (authorization === 'Bearer refreshed-token') {
+			return new Response(null, {status: retryStatus});
+		}
+
+		return new Response(null, {status: 401});
+	}));
 
 	const response = await fetchWithHooks('/api');
 
@@ -84,11 +84,11 @@ test('beforeRequest - receives resolved URL and options', async t => {
 	const mockFetch = createCapturingFetch();
 	let receivedContext;
 
-	const fetchWithHooks = withHooks(mockFetch, {
+	const fetchWithHooks = withHooks({
 		beforeRequest(context) {
 			receivedContext = context;
 		},
-	});
+	})(mockFetch);
 
 	await fetchWithHooks('https://example.com/api', {method: 'POST'});
 
@@ -99,11 +99,11 @@ test('beforeRequest - receives resolved URL and options', async t => {
 test('beforeRequest - returning options replaces them', async t => {
 	const mockFetch = createCapturingFetch();
 
-	const fetchWithHooks = withHooks(mockFetch, {
+	const fetchWithHooks = withHooks({
 		beforeRequest({options}) {
 			return {...options, headers: {'X-Custom': 'value'}};
 		},
-	});
+	})(mockFetch);
 
 	await fetchWithHooks('/api');
 
@@ -114,11 +114,11 @@ test('beforeRequest - returning options replaces them', async t => {
 test('beforeRequest - returning undefined passes original options', async t => {
 	const mockFetch = createCapturingFetch();
 
-	const fetchWithHooks = withHooks(mockFetch, {
+	const fetchWithHooks = withHooks({
 		beforeRequest() {
 			// Observation only
 		},
-	});
+	})(mockFetch);
 
 	await fetchWithHooks('/api', {method: 'DELETE'});
 
@@ -129,11 +129,11 @@ test('beforeRequest - returning undefined passes original options', async t => {
 test('beforeRequest - returning a Response short-circuits the request', async t => {
 	const mockFetch = createCapturingFetch();
 
-	const fetchWithHooks = withHooks(mockFetch, {
+	const fetchWithHooks = withHooks({
 		beforeRequest() {
 			return new Response('short-circuited', {status: 203});
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithHooks('/api');
 
@@ -148,10 +148,10 @@ test('beforeRequest short-circuit sees effective prepared headers in documented 
 
 	const fetchWithAll = pipeline(
 		mockFetch,
-		fetchFunction => withHeaders(fetchFunction, async () => ({
+		withHeaders(async () => ({
 			Authorization: 'Bearer prepared-token',
 		})),
-		fetchFunction => withHooks(fetchFunction, {
+		withHooks({
 			beforeRequest({options}) {
 				observedAuthorization = new Headers(options.headers).get('authorization');
 				return new Response('short-circuited', {status: 203});
@@ -173,8 +173,8 @@ test('beforeRequest short-circuit sees prepared serialized body in documented pi
 
 	const fetchWithAll = pipeline(
 		mockFetch,
-		withJsonBody,
-		fetchFunction => withHooks(fetchFunction, {
+		withJsonBody(),
+		withHooks({
 			beforeRequest({options}) {
 				observedBody = options.body;
 				observedContentType = new Headers(options.headers).get('content-type');
@@ -206,12 +206,12 @@ test('beforeRequest short-circuit sees inherited Request body in context', async
 	const originalBody = request.body;
 	let observedBody;
 
-	const fetchWithHooks = withHooks(mockFetch, {
+	const fetchWithHooks = withHooks({
 		beforeRequest({options}) {
 			observedBody = options.body;
 			return new Response('short-circuited', {status: 203});
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithHooks(request);
 
@@ -224,14 +224,14 @@ test('beforeRequest - short-circuit skips afterResponse', async t => {
 	const mockFetch = createCapturingFetch();
 	let afterResponseCalled = false;
 
-	const fetchWithHooks = withHooks(mockFetch, {
+	const fetchWithHooks = withHooks({
 		beforeRequest() {
 			return new Response('early', {status: 200});
 		},
 		afterResponse() {
 			afterResponseCalled = true;
 		},
-	});
+	})(mockFetch);
 
 	await fetchWithHooks('/api');
 
@@ -242,11 +242,11 @@ test('afterResponse - receives response, URL, and options', async t => {
 	const mockFetch = createCapturingFetch();
 	let receivedContext;
 
-	const fetchWithHooks = withHooks(mockFetch, {
+	const fetchWithHooks = withHooks({
 		afterResponse(context) {
 			receivedContext = context;
 		},
-	});
+	})(mockFetch);
 
 	await fetchWithHooks('https://example.com/api', {method: 'GET'});
 
@@ -259,11 +259,11 @@ test('afterResponse - receives response, URL, and options', async t => {
 test('afterResponse - returning a Response replaces it', async t => {
 	const mockFetch = createCapturingFetch();
 
-	const fetchWithHooks = withHooks(mockFetch, {
+	const fetchWithHooks = withHooks({
 		afterResponse() {
 			return new Response('replaced', {status: 201});
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithHooks('/api');
 
@@ -274,11 +274,11 @@ test('afterResponse - returning a Response replaces it', async t => {
 test('afterResponse - returning undefined passes original response', async t => {
 	const mockFetch = createCapturingFetch();
 
-	const fetchWithHooks = withHooks(mockFetch, {
+	const fetchWithHooks = withHooks({
 		afterResponse() {
 			// Observation only
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithHooks('/api');
 
@@ -290,14 +290,14 @@ test('both hooks together', async t => {
 	const mockFetch = createCapturingFetch();
 	const log = [];
 
-	const fetchWithHooks = withHooks(mockFetch, {
+	const fetchWithHooks = withHooks({
 		beforeRequest({url}) {
 			log.push(`before:${url}`);
 		},
 		afterResponse({url, response}) {
 			log.push(`after:${url}:${response.status}`);
 		},
-	});
+	})(mockFetch);
 
 	await fetchWithHooks('https://example.com/api');
 
@@ -307,7 +307,7 @@ test('both hooks together', async t => {
 test('async hooks', async t => {
 	const mockFetch = createCapturingFetch();
 
-	const fetchWithHooks = withHooks(mockFetch, {
+	const fetchWithHooks = withHooks({
 		async beforeRequest({options}) {
 			await new Promise(resolve => {
 				setTimeout(resolve, 10);
@@ -322,7 +322,7 @@ test('async hooks', async t => {
 
 			return new Response('async-replaced', {status: 202});
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithHooks('/api');
 
@@ -340,14 +340,14 @@ test('beforeRequest aborts before an async hook settles', async t => {
 		resolveBeforeRequest = resolve;
 	});
 
-	const fetchWithHooks = withHooks(mockFetch, {
+	const fetchWithHooks = withHooks({
 		async beforeRequest() {
 			resolveBeforeRequest();
 			await new Promise(resolve => {
 				setTimeout(resolve, 200);
 			});
 		},
-	});
+	})(mockFetch);
 
 	const fetchPromise = fetchWithHooks('/api', {signal: controller.signal});
 
@@ -376,14 +376,14 @@ test('afterResponse aborts before an async hook settles', async t => {
 		resolveAfterResponse = resolve;
 	});
 
-	const fetchWithHooks = withHooks(mockFetch, {
+	const fetchWithHooks = withHooks({
 		async afterResponse() {
 			resolveAfterResponse();
 			await new Promise(resolve => {
 				setTimeout(resolve, 200);
 			});
 		},
-	});
+	})(mockFetch);
 
 	const fetchPromise = fetchWithHooks('/api', {signal: controller.signal});
 
@@ -408,14 +408,14 @@ test('afterResponse receives modified options from beforeRequest', async t => {
 	const mockFetch = createCapturingFetch();
 	let afterOptions;
 
-	const fetchWithHooks = withHooks(mockFetch, {
+	const fetchWithHooks = withHooks({
 		beforeRequest({options}) {
 			return {...options, headers: {'X-Modified': 'true'}};
 		},
 		afterResponse({options}) {
 			afterOptions = options;
 		},
-	});
+	})(mockFetch);
 
 	await fetchWithHooks('/api');
 
@@ -424,7 +424,7 @@ test('afterResponse receives modified options from beforeRequest', async t => {
 
 test('no hooks provided - passthrough', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithHooks = withHooks(mockFetch);
+	const fetchWithHooks = withHooks()(mockFetch);
 
 	const response = await fetchWithHooks('/api', {method: 'POST'});
 
@@ -439,10 +439,10 @@ test('error from fetch propagates', async t => {
 		throw error;
 	};
 
-	const fetchWithHooks = withHooks(failingFetch, {
+	const fetchWithHooks = withHooks({
 		beforeRequest() {},
 		afterResponse() {},
-	});
+	})(failingFetch);
 
 	await t.throwsAsync(fetchWithHooks('/api'), {message: 'Network error'});
 });
@@ -450,11 +450,11 @@ test('error from fetch propagates', async t => {
 test('error from beforeRequest propagates', async t => {
 	const mockFetch = createCapturingFetch();
 
-	const fetchWithHooks = withHooks(mockFetch, {
+	const fetchWithHooks = withHooks({
 		beforeRequest() {
 			throw new Error('Hook error');
 		},
-	});
+	})(mockFetch);
 
 	await t.throwsAsync(fetchWithHooks('/api'), {message: 'Hook error'});
 	t.is(mockFetch.calls.length, 0);
@@ -463,22 +463,22 @@ test('error from beforeRequest propagates', async t => {
 test('error from afterResponse propagates', async t => {
 	const mockFetch = createCapturingFetch();
 
-	const fetchWithHooks = withHooks(mockFetch, {
+	const fetchWithHooks = withHooks({
 		afterResponse() {
 			throw new Error('After hook error');
 		},
-	});
+	})(mockFetch);
 
 	await t.throwsAsync(fetchWithHooks('/api'), {message: 'After hook error'});
 });
 
 test('preserves fetch metadata through copyFetchMetadata', t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithTimeout = withTimeout(mockFetch, 5000);
+	const fetchWithTimeout = withTimeout(5000)(mockFetch);
 
-	const fetchWithHooks = withHooks(fetchWithTimeout, {
+	const fetchWithHooks = withHooks({
 		beforeRequest() {},
-	});
+	})(fetchWithTimeout);
 
 	t.is(fetchWithHooks[timeoutDurationSymbol], 5000);
 });
@@ -487,8 +487,8 @@ test('withTimeout bounds async beforeRequest hooks in documented pipeline order'
 	const mockFetch = createCapturingFetch();
 	const fetchWithHooks = pipeline(
 		mockFetch,
-		fetchFunction => withTimeout(fetchFunction, 50),
-		fetchFunction => withHooks(fetchFunction, {
+		withTimeout(50),
+		withHooks({
 			async beforeRequest() {
 				await new Promise(resolve => {
 					setTimeout(resolve, 100);
@@ -507,8 +507,8 @@ test('withTimeout bounds async afterResponse hooks in documented pipeline order'
 	const mockFetch = createCapturingFetch();
 	const fetchWithHooks = pipeline(
 		mockFetch,
-		fetchFunction => withTimeout(fetchFunction, 50),
-		fetchFunction => withHooks(fetchFunction, {
+		withTimeout(50),
+		withHooks({
 			async afterResponse() {
 				await new Promise(resolve => {
 					setTimeout(resolve, 100);
@@ -542,8 +542,8 @@ test('withTimeout reuses one timeout budget across beforeRequest and fetch in do
 
 	const fetchWithHooks = pipeline(
 		mockFetch,
-		fetchFunction => withTimeout(fetchFunction, 50),
-		fetchFunction => withHooks(fetchFunction, {
+		withTimeout(50),
+		withHooks({
 			async beforeRequest() {
 				await new Promise(resolve => {
 					setTimeout(resolve, 30);
@@ -587,11 +587,11 @@ test('completed hooks remove abort listeners from reused signals', async t => {
 		signal.removeEventListener = originalRemoveEventListener;
 	});
 
-	const fetchWithHooks = withHooks(mockFetch, {
+	const fetchWithHooks = withHooks({
 		async beforeRequest() {
 			await Promise.resolve();
 		},
-	});
+	})(mockFetch);
 
 	await fetchWithHooks('/api/1', {signal});
 	await fetchWithHooks('/api/2', {signal});
@@ -603,11 +603,11 @@ test('beforeRequest - works with Request object as input', async t => {
 	const mockFetch = createCapturingFetch();
 	let receivedContext;
 
-	const fetchWithHooks = withHooks(mockFetch, {
+	const fetchWithHooks = withHooks({
 		beforeRequest(context) {
 			receivedContext = context;
 		},
-	});
+	})(mockFetch);
 
 	const request = new Request('https://example.com/api', {method: 'PUT'});
 	await fetchWithHooks(request);
@@ -626,14 +626,14 @@ test('hooks receive inherited Request body in context', async t => {
 		duplex: 'half',
 	});
 	const originalBody = request.body;
-	const fetchWithHooks = withHooks(mockFetch, {
+	const fetchWithHooks = withHooks({
 		beforeRequest(context) {
 			contexts.push({hook: 'beforeRequest', ...context});
 		},
 		afterResponse(context) {
 			contexts.push({hook: 'afterResponse', ...context});
 		},
-	});
+	})(mockFetch);
 
 	await fetchWithHooks(request);
 
@@ -652,7 +652,7 @@ test('beforeRequest can merge inherited Request headers with object spread', asy
 		body: '{"name":"Alice"}',
 		duplex: 'half',
 	});
-	const fetchWithHooks = withHooks(mockFetch, {
+	const fetchWithHooks = withHooks({
 		beforeRequest({options}) {
 			return {
 				...options,
@@ -662,7 +662,7 @@ test('beforeRequest can merge inherited Request headers with object spread', asy
 				},
 			};
 		},
-	});
+	})(mockFetch);
 
 	await fetchWithHooks(request);
 
@@ -677,8 +677,8 @@ test('resolves URL through withBaseUrl', async t => {
 
 	const fetchWithAll = pipeline(
 		mockFetch,
-		f => withBaseUrl(f, 'https://api.example.com'),
-		f => withHooks(f, {
+		withBaseUrl('https://api.example.com'),
+		withHooks({
 			beforeRequest({url}) {
 				receivedUrl = url;
 			},
@@ -696,8 +696,8 @@ test('hooks receive effective request options in documented pipeline order', asy
 
 	const fetchWithAll = pipeline(
 		mockFetch,
-		fetchFunction => withHeaders(fetchFunction, {authorization: 'Bearer token'}),
-		fetchFunction => withHooks(fetchFunction, {
+		withHeaders({authorization: 'Bearer token'}),
+		withHooks({
 			beforeRequest(context) {
 				contexts.push({hook: 'beforeRequest', ...context});
 			},
@@ -721,8 +721,8 @@ test('hooks receive function-based default headers in documented pipeline order'
 
 	const fetchWithAll = pipeline(
 		mockFetch,
-		fetchFunction => withHeaders(fetchFunction, async () => ({authorization: 'Bearer dynamic-token'})),
-		fetchFunction => withHooks(fetchFunction, createRecordingHooks(contexts)),
+		withHeaders(async () => ({authorization: 'Bearer dynamic-token'})),
+		withHooks(createRecordingHooks(contexts)),
 	);
 
 	await fetchWithAll('https://example.com/api');
@@ -736,11 +736,11 @@ test('hooks see per-call headers overriding function-based defaults in documente
 
 	const fetchWithAll = pipeline(
 		mockFetch,
-		fetchFunction => withHeaders(fetchFunction, async () => ({
+		withHeaders(async () => ({
 			authorization: 'Bearer dynamic-token',
 			'x-default': 'yes',
 		})),
-		fetchFunction => withHooks(fetchFunction, createRecordingHooks(contexts)),
+		withHooks(createRecordingHooks(contexts)),
 	);
 
 	await fetchWithAll('https://example.com/api', {
@@ -761,11 +761,11 @@ test('hooks and the actual request share the same resolved stateful default head
 
 	const fetchWithAll = pipeline(
 		mockFetch,
-		fetchFunction => withHeaders(fetchFunction, () => {
+		withHeaders(() => {
 			tokenNumber++;
 			return {authorization: `Bearer token-${tokenNumber}`};
 		}),
-		fetchFunction => withHooks(fetchFunction, createRecordingHooks(contexts)),
+		withHooks(createRecordingHooks(contexts)),
 	);
 
 	await fetchWithAll('https://example.com/api');
@@ -784,7 +784,7 @@ test('hooks and the actual request share the same resolved custom request header
 		return new Headers({'x-dynamic': `value-${headerNumber}`});
 	};
 
-	const fetchWithHooks = withHooks(mockFetch, createRecordingHooks(contexts));
+	const fetchWithHooks = withHooks(createRecordingHooks(contexts))(mockFetch);
 
 	await fetchWithHooks('https://example.com/api');
 
@@ -801,11 +801,11 @@ test('beforeRequest that returns new options re-resolves function-based headers'
 
 	const fetchWithAll = pipeline(
 		mockFetch,
-		fetchFunction => withHeaders(fetchFunction, () => {
+		withHeaders(() => {
 			resolverCallCount++;
 			return {authorization: `Bearer token-${resolverCallCount}`};
 		}),
-		fetchFunction => withHooks(fetchFunction, {
+		withHooks({
 			beforeRequest({options}) {
 				return {
 					...options,
@@ -838,7 +838,7 @@ test('beforeRequest that returns new options re-resolves custom resolved request
 		});
 	};
 
-	const fetchWithHooks = withHooks(mockFetch, {
+	const fetchWithHooks = withHooks({
 		beforeRequest({options}) {
 			return {
 				...options,
@@ -847,7 +847,7 @@ test('beforeRequest that returns new options re-resolves custom resolved request
 				},
 			};
 		},
-	});
+	})(mockFetch);
 
 	await fetchWithHooks('https://example.com/api');
 
@@ -868,7 +868,7 @@ test('afterResponse sees re-resolved custom request headers after beforeRequest 
 		});
 	};
 
-	const fetchWithHooks = withHooks(mockFetch, {
+	const fetchWithHooks = withHooks({
 		beforeRequest({options}) {
 			return {
 				...options,
@@ -880,7 +880,7 @@ test('afterResponse sees re-resolved custom request headers after beforeRequest 
 		afterResponse({options}) {
 			afterResponseHeader = new Headers(options.headers).get('x-dynamic');
 		},
-	});
+	})(mockFetch);
 
 	await fetchWithHooks('https://example.com/api');
 
@@ -896,11 +896,11 @@ test('afterResponse sees re-resolved function-based headers after beforeRequest 
 
 	const fetchWithAll = pipeline(
 		mockFetch,
-		fetchFunction => withHeaders(fetchFunction, () => {
+		withHeaders(() => {
 			resolverCallCount++;
 			return {authorization: `Bearer token-${resolverCallCount}`};
 		}),
-		fetchFunction => withHooks(fetchFunction, {
+		withHooks({
 			beforeRequest({options}) {
 				return {
 					...options,
@@ -932,8 +932,8 @@ test('afterResponse sees the same resolved function-based headers as beforeReque
 
 	const fetchWithAll = pipeline(
 		mockFetch,
-		fetchFunction => withHeaders(fetchFunction, async () => ({'x-dynamic': 'resolved'})),
-		fetchFunction => withHooks(fetchFunction, {
+		withHeaders(async () => ({'x-dynamic': 'resolved'})),
+		withHooks({
 			beforeRequest({options}) {
 				beforeHeaders = new Headers(options.headers).get('x-dynamic');
 			},
@@ -956,8 +956,8 @@ test('beforeRequest returning a new body re-resolves withJsonBody and afterRespo
 
 	const fetchWithAll = pipeline(
 		mockFetch,
-		withJsonBody,
-		fetchFunction => withHooks(fetchFunction, {
+		withJsonBody(),
+		withHooks({
 			beforeRequest({options}) {
 				return {
 					...options,
@@ -992,8 +992,8 @@ test('only afterResponse without beforeRequest', async t => {
 
 	const fetchWithAll = pipeline(
 		mockFetch,
-		f => withBaseUrl(f, 'https://api.example.com'),
-		f => withHooks(f, {
+		withBaseUrl('https://api.example.com'),
+		withHooks({
 			afterResponse(context) {
 				receivedContext = context;
 			},
@@ -1012,8 +1012,8 @@ test('beforeRequest spread preserves resolved body from request-building wrapper
 	const mockFetch = createCapturingFetch();
 	const fetchWithAll = pipeline(
 		mockFetch,
-		withJsonBody,
-		fetchFunction => withHooks(fetchFunction, {
+		withJsonBody(),
+		withHooks({
 			beforeRequest({options}) {
 				return {
 					...options,
@@ -1050,14 +1050,14 @@ test('beforeRequest spread can clear an inherited Request body by changing metho
 		duplex: 'half',
 	});
 
-	const fetchWithHooks = withHooks(mockFetch, {
+	const fetchWithHooks = withHooks({
 		beforeRequest({options}) {
 			return {
 				...options,
 				method: 'GET',
 			};
 		},
-	});
+	})(mockFetch);
 
 	await fetchWithHooks(request);
 
@@ -1069,19 +1069,19 @@ test('beforeRequest returning inherited Request body options unchanged does not 
 	let callCount = 0;
 	let refreshCalled = false;
 
-	const fetchWithHooks = withHooks(withTokenRefresh(async () => {
-		callCount++;
-		return new Response(null, {status: 401});
-	}, {
+	const fetchWithHooks = withHooks({
+		beforeRequest({options}) {
+			return options;
+		},
+	})(withTokenRefresh({
 		async refreshToken() {
 			refreshCalled = true;
 			return 'new-token';
 		},
-	}), {
-		beforeRequest({options}) {
-			return options;
-		},
-	});
+	})(async () => {
+		callCount++;
+		return new Response(null, {status: 401});
+	}));
 
 	const request = new Request('https://example.com/upload', {
 		method: 'POST',
@@ -1102,14 +1102,7 @@ test('withHooks outside withTokenRefresh observes a failed refresh as one public
 	let afterResponseCount = 0;
 	let afterStatus;
 
-	const fetchWithHooks = withHooks(withTokenRefresh(async () => {
-		fetchCallCount++;
-		return new Response(null, {status: 401});
-	}, {
-		async refreshToken() {
-			throw new Error('refresh failed');
-		},
-	}), {
+	const fetchWithHooks = withHooks({
 		beforeRequest() {
 			beforeRequestCount++;
 		},
@@ -1117,7 +1110,14 @@ test('withHooks outside withTokenRefresh observes a failed refresh as one public
 			afterResponseCount++;
 			afterStatus = response.status;
 		},
-	});
+	})(withTokenRefresh({
+		async refreshToken() {
+			throw new Error('refresh failed');
+		},
+	})(async () => {
+		fetchCallCount++;
+		return new Response(null, {status: 401});
+	}));
 
 	const response = await fetchWithHooks('/api');
 
@@ -1141,7 +1141,16 @@ test('withHooks outside withTokenRefresh receives the final retried response obj
 	let afterResponseHeader;
 	let afterResponseText;
 
-	const fetchWithHooks = withHooks(withTokenRefresh(async (_url, options = {}) => {
+	const fetchWithHooks = withHooks({
+		async afterResponse({response}) {
+			afterResponseHeader = response.headers.get('x-retried');
+			afterResponseText = await response.clone().text();
+		},
+	})(withTokenRefresh({
+		async refreshToken() {
+			return 'refreshed-token';
+		},
+	})(async (_url, options = {}) => {
 		fetchCallCount++;
 		const authorization = new Headers(options.headers).get('Authorization');
 
@@ -1155,16 +1164,7 @@ test('withHooks outside withTokenRefresh receives the final retried response obj
 		}
 
 		return new Response('initial', {status: 401});
-	}, {
-		async refreshToken() {
-			return 'refreshed-token';
-		},
-	}), {
-		async afterResponse({response}) {
-			afterResponseHeader = response.headers.get('x-retried');
-			afterResponseText = await response.clone().text();
-		},
-	});
+	}));
 
 	const response = await fetchWithHooks('/api');
 

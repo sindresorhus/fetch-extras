@@ -1,6 +1,6 @@
 # withJsonResponse
 
-## withJsonResponse(fetchFunction, options?)
+## withJsonResponse(options?)
 
 Wraps a fetch function to automatically parse response bodies as JSON. Optionally validates the parsed JSON against a [Standard Schema](https://standardschema.dev).
 
@@ -12,13 +12,12 @@ Empty responses are not special-cased. If the response body is empty, including 
 
 ## Parameters
 
-- `fetchFunction` (`typeof fetch`) - The fetch function to wrap (usually the global `fetch`).
 - `options` (optional)
   - `schema` (`StandardSchemaV1`) - A Standard Schema object to validate response JSON against.
 
 ## Returns
 
-A wrapped fetch function that returns the parsed JSON data (or validated data if a schema is provided) instead of a `Response`.
+A function that takes a fetch function and returns a wrapped fetch function that returns the parsed JSON data (or validated data if a schema is provided) instead of a `Response`.
 
 ## Errors
 
@@ -30,7 +29,7 @@ Throws a `SyntaxError` if the response body is empty or is not valid JSON.
 ```js
 import {withJsonResponse} from 'fetch-extras';
 
-const fetchJson = withJsonResponse(fetch);
+const fetchJson = withJsonResponse()(fetch);
 const data = await fetchJson('/api/user/1');
 
 console.log(data.name);
@@ -44,7 +43,7 @@ import {z} from 'zod';
 
 const userSchema = z.object({name: z.string(), age: z.number()});
 
-const fetchUser = withJsonResponse(fetch, {schema: userSchema});
+const fetchUser = withJsonResponse({schema: userSchema})(fetch);
 const user = await fetchUser('/api/user/1');
 
 console.log(user.name);
@@ -60,9 +59,9 @@ const userSchema = z.object({name: z.string()});
 
 const fetchUser = pipeline(
 	fetch,
-	f => withTimeout(f, 5000),
-	withHttpError,
-	f => withJsonResponse(f, {schema: userSchema}),
+	withTimeout(5000),
+	withHttpError(),
+	withJsonResponse({schema: userSchema}),
 );
 
 const user = await fetchUser('/api/user/1');

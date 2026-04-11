@@ -16,26 +16,25 @@ Can be combined with other `with*` functions. In documented `pipeline()` order, 
 ```
 const apiFetch = pipeline(
 	fetch,
-	f => withTokenRefresh(f, {refreshToken: ...}),
-	withHttpError,
+	withTokenRefresh({refreshToken: ...}),
+	withHttpError(),
 );
 ```
 
-@param fetchFunction - The fetch function to wrap (usually the global `fetch`).
 @param options - Token refresh options.
-@returns A wrapped fetch function that retries once with a refreshed `Authorization: Bearer <token>` header on 401 responses.
+@returns A wrapper that takes a fetch function and returns a wrapped fetch function that retries once with a refreshed `Authorization: Bearer <token>` header on 401 responses.
 
 @example
 ```
 import {withTokenRefresh} from 'fetch-extras';
 
-const apiFetch = withTokenRefresh(fetch, {
+const apiFetch = withTokenRefresh({
 	refreshToken: async () => {
 		const response = await fetch('/auth/refresh', {method: 'POST'});
 		const {accessToken} = await response.json();
 		return accessToken;
 	},
-});
+})(fetch);
 
 const response = await apiFetch('/api/users');
 const data = await response.json();
@@ -47,26 +46,25 @@ import {pipeline, withHttpError, withTokenRefresh, withBaseUrl} from 'fetch-extr
 
 const apiFetch = pipeline(
 	fetch,
-	f => withBaseUrl(f, 'https://api.example.com'),
-	f => withTokenRefresh(f, {
+	withBaseUrl('https://api.example.com'),
+	withTokenRefresh({
 		refreshToken: async () => {
 			const response = await fetch('/auth/refresh', {method: 'POST'});
 			const {accessToken} = await response.json();
 			return accessToken;
 		},
 	}),
-	withHttpError,
+	withHttpError(),
 );
 
 const response = await apiFetch('/users');
 ```
 */
 export function withTokenRefresh(
-	fetchFunction: typeof fetch,
 	options: {
 		/**
 		Called when a 401 response is received. Should return the new token string.
 		*/
 		refreshToken: () => string | Promise<string>;
 	}
-): typeof fetch;
+): (fetchFunction: typeof fetch) => typeof fetch;

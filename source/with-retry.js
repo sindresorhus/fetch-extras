@@ -43,7 +43,6 @@ Requests with a one-shot body provided via `options.body`, such as a `ReadableSt
 
 `withRetry()` resolves replayable request bodies once before the first attempt so later retries can reuse them. When a wrapper couples body resolution to header resolution, `withRetry()` preserves those resolved headers with the prepared body for every attempt. Other request-scoped header wrappers may still run again on each retry. If you need retry-time auth behavior, use a wrapper with explicit retry semantics such as `withTokenRefresh()`.
 
-@param {typeof fetch} fetchFunction - The fetch function to wrap (usually the global `fetch`).
 @param {object} [options]
 @param {number} [options.retries=2] - Number of retries after the initial attempt. `retries: 2` means up to 3 total attempts.
 @param {string[]} [options.methods=['GET','HEAD','PUT','DELETE','OPTIONS','TRACE']] - HTTP methods to retry.
@@ -51,9 +50,9 @@ Requests with a one-shot body provided via `options.body`, such as a `ReadableSt
 @param {number} [options.maxRetryAfter=60000] - Maximum `Retry-After` duration in milliseconds. If the server requests a longer delay, the response is returned without retrying.
 @param {(attemptNumber: number) => number} [options.backoff] - Function returning the delay in milliseconds before a retry. Receives the 1-based attempt number that just failed.
 @param {(context: {error?: Error, response?: Response, attemptNumber: number, retriesLeft: number}) => boolean | Promise<boolean>} [options.shouldRetry] - Called after built-in checks pass, before retrying. Return `false` to stop retrying.
-@returns {typeof fetch} A wrapped fetch function with automatic retry.
+@returns {(fetchFunction: typeof fetch) => typeof fetch} A function that accepts a fetch function and returns a wrapped fetch function with automatic retry.
 */
-export function withRetry(fetchFunction, options = {}) {
+export function withRetry(options = {}) {
 	const {
 		retries = 2,
 		methods = [...defaultRetriableMethods],
@@ -89,102 +88,104 @@ export function withRetry(fetchFunction, options = {}) {
 		return backoff(attemptNumber);
 	};
 
-	const shouldResolveHeadersForRetry = (request, fetchOptions, bodyResolvedFetchOptions) => bodyResolvedFetchOptions !== fetchOptions
-		|| (request && fetchOptions.body !== undefined && fetchOptions.headers !== undefined);
+	return fetchFunction => {
+		const shouldResolveHeadersForRetry = (request, fetchOptions, bodyResolvedFetchOptions) => bodyResolvedFetchOptions !== fetchOptions
+			|| (request && fetchOptions.body !== undefined && fetchOptions.headers !== undefined);
 
-	const getAttemptState = async ({urlOrRequest, fetchOptions, request, bodyResolvedFetchOptions}) => {
-		let requestOptions = bodyResolvedFetchOptions;
-		let attemptOptions = withFetchSignal(fetchFunction, urlOrRequest, requestOptions);
+		const getAttemptState = async ({urlOrRequest, fetchOptions, request, bodyResolvedFetchOptions}) => {
+			let requestOptions = bodyResolvedFetchOptions;
+			let attemptOptions = withFetchSignal(fetchFunction, urlOrRequest, requestOptions);
 
-		if (shouldResolveHeadersForRetry(request, fetchOptions, bodyResolvedFetchOptions)) {
-			const attemptSignal = attemptOptions.signal;
-			requestOptions = withResolvedRequestHeaders(
-				bodyResolvedFetchOptions,
-				await getResolvedRequestHeaders(fetchFunction, urlOrRequest, {...fetchOptions, signal: attemptSignal}),
-			);
-			attemptOptions = attemptSignal === undefined
-				? requestOptions
-				: {...requestOptions, signal: attemptSignal};
-		}
-
-		return {
-			attemptOptions,
-			attemptSignal: attemptOptions.signal,
-		};
-	};
-
-	const fetchWithRetry = async (urlOrRequest, fetchOptions = {}) => {
-		const request = urlOrRequest instanceof Request ? urlOrRequest : undefined;
-		const method = (fetchOptions.method ?? request?.method ?? 'GET').toUpperCase();
-
-		if (!retriableMethods.has(method)) {
-			return fetchFunction(urlOrRequest, fetchOptions);
-		}
-
-		const bodyResolvedFetchOptions = resolveRequestBodyOptions(fetchFunction, urlOrRequest, fetchOptions);
-		const canRetryBody = !(request?.body && fetchOptions.body === undefined) && !isNonReplayableBody(bodyResolvedFetchOptions.body);
-		const maximumAttempts = canRetryBody ? retries : 0;
-		const {
-			attemptOptions,
-			attemptSignal,
-		} = await getAttemptState({
-			urlOrRequest,
-			fetchOptions,
-			request,
-			bodyResolvedFetchOptions,
-		});
-
-		/* eslint-disable no-await-in-loop */
-		for (let attempt = 0; attempt <= maximumAttempts; attempt++) {
-			const isLastAttempt = attempt >= maximumAttempts;
-			let response;
-			try {
-				response = await fetchFunction(urlOrRequest, attemptOptions);
-			} catch (error) {
-				if (isLastAttempt || !isNetworkError(error)) {
-					throw error;
-				}
-
-				if (!await waitForAbortable(
-					() => shouldRetry({error, attemptNumber: attempt + 1, retriesLeft: retries - attempt}),
-					attemptSignal,
-				)) {
-					throw error;
-				}
-
-				await delay(backoff(attempt + 1), {signal: attemptSignal});
-				continue;
-			}
-
-			if (!retriableStatusCodes.has(response.status) || isLastAttempt) {
-				return response;
-			}
-
-			const retryDelay = getRetryDelay(response, attempt + 1);
-			if (retryDelay === undefined) {
-				return response;
-			}
-
-			let shouldRetryResponse;
-			try {
-				shouldRetryResponse = await waitForAbortable(
-					() => shouldRetry({response, attemptNumber: attempt + 1, retriesLeft: retries - attempt}),
-					attemptSignal,
+			if (shouldResolveHeadersForRetry(request, fetchOptions, bodyResolvedFetchOptions)) {
+				const attemptSignal = attemptOptions.signal;
+				requestOptions = withResolvedRequestHeaders(
+					bodyResolvedFetchOptions,
+					await getResolvedRequestHeaders(fetchFunction, urlOrRequest, {...fetchOptions, signal: attemptSignal}),
 				);
-			} catch (error) {
+				attemptOptions = attemptSignal === undefined
+					? requestOptions
+					: {...requestOptions, signal: attemptSignal};
+			}
+
+			return {
+				attemptOptions,
+				attemptSignal: attemptOptions.signal,
+			};
+		};
+
+		const fetchWithRetry = async (urlOrRequest, fetchOptions = {}) => {
+			const request = urlOrRequest instanceof Request ? urlOrRequest : undefined;
+			const method = (fetchOptions.method ?? request?.method ?? 'GET').toUpperCase();
+
+			if (!retriableMethods.has(method)) {
+				return fetchFunction(urlOrRequest, fetchOptions);
+			}
+
+			const bodyResolvedFetchOptions = resolveRequestBodyOptions(fetchFunction, urlOrRequest, fetchOptions);
+			const canRetryBody = !(request?.body && fetchOptions.body === undefined) && !isNonReplayableBody(bodyResolvedFetchOptions.body);
+			const maximumAttempts = canRetryBody ? retries : 0;
+			const {
+				attemptOptions,
+				attemptSignal,
+			} = await getAttemptState({
+				urlOrRequest,
+				fetchOptions,
+				request,
+				bodyResolvedFetchOptions,
+			});
+
+			/* eslint-disable no-await-in-loop */
+			for (let attempt = 0; attempt <= maximumAttempts; attempt++) {
+				const isLastAttempt = attempt >= maximumAttempts;
+				let response;
+				try {
+					response = await fetchFunction(urlOrRequest, attemptOptions);
+				} catch (error) {
+					if (isLastAttempt || !isNetworkError(error)) {
+						throw error;
+					}
+
+					if (!await waitForAbortable(
+						() => shouldRetry({error, attemptNumber: attempt + 1, retriesLeft: retries - attempt}),
+						attemptSignal,
+					)) {
+						throw error;
+					}
+
+					await delay(backoff(attempt + 1), {signal: attemptSignal});
+					continue;
+				}
+
+				if (!retriableStatusCodes.has(response.status) || isLastAttempt) {
+					return response;
+				}
+
+				const retryDelay = getRetryDelay(response, attempt + 1);
+				if (retryDelay === undefined) {
+					return response;
+				}
+
+				let shouldRetryResponse;
+				try {
+					shouldRetryResponse = await waitForAbortable(
+						() => shouldRetry({response, attemptNumber: attempt + 1, retriesLeft: retries - attempt}),
+						attemptSignal,
+					);
+				} catch (error) {
+					await discardBody(response.body);
+					throw error;
+				}
+
+				if (!shouldRetryResponse) {
+					return response;
+				}
+
 				await discardBody(response.body);
-				throw error;
+				await delay(retryDelay, {signal: attemptSignal});
 			}
+			/* eslint-enable no-await-in-loop */
+		};
 
-			if (!shouldRetryResponse) {
-				return response;
-			}
-
-			await discardBody(response.body);
-			await delay(retryDelay, {signal: attemptSignal});
-		}
-		/* eslint-enable no-await-in-loop */
+		return copyFetchMetadata(fetchWithRetry, fetchFunction);
 	};
-
-	return copyFetchMetadata(fetchWithRetry, fetchFunction);
 }

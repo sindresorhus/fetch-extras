@@ -147,107 +147,110 @@ function getCachedResponse({entry, cacheMode, currentTime, isRangedRequest}) {
 	}
 }
 
-export function withCache(fetchFunction, {ttl}) {
+export function withCache({ttl}) {
 	if (typeof ttl !== 'number' || ttl <= 0 || !Number.isFinite(ttl)) {
 		throw new TypeError('`ttl` must be a positive finite number.');
 	}
 
-	const cache = new Map();
-	const state = new Map();
-	const resources = {cache, state};
+	return fetchFunction => {
+		// Cache state is per wrapped fetch function, not per curried wrapper factory.
+		const cache = new Map();
+		const state = new Map();
+		const resources = {cache, state};
 
-	const fetchWithCache = async (urlOrRequest, options = {}) => {
-		const {method, url, cacheMode, signal, fetchOptions} = getRequestContext(fetchFunction, urlOrRequest, options);
+		const fetchWithCache = async (urlOrRequest, options = {}) => {
+			const {method, url, cacheMode, signal, fetchOptions} = getRequestContext(fetchFunction, urlOrRequest, options);
 
-		// Non-GET requests pass through; unsafe methods also invalidate cache
-		if (method !== 'GET') {
-			if (nonInvalidatingMethods.has(method)) {
-				return fetchFunction(urlOrRequest, fetchOptions);
-			}
-
-			signal?.throwIfAborted();
-
-			const generation = getGeneration(cache, state, url);
-			return trackPending(resources, url, 'pendingInvalidationCount', async urlState => {
-				let didInvalidate = false;
-				const invalidate = () => {
-					if (didInvalidate) {
-						return;
-					}
-
-					didInvalidate = true;
-					cache.delete(url);
-					urlState.generation = generation + 1;
-				};
-
-				if (!fetchFunction[defersFetchStartSymbol]) {
-					invalidate();
+			// Non-GET requests pass through; unsafe methods also invalidate cache
+			if (method !== 'GET') {
+				if (nonInvalidatingMethods.has(method)) {
 					return fetchFunction(urlOrRequest, fetchOptions);
 				}
 
-				return fetchFunction(urlOrRequest, {...fetchOptions, [notifyFetchStartSymbol]: invalidate});
-			});
-		}
+				signal?.throwIfAborted();
 
-		const requestContext = {
-			method,
-			url,
-			cacheMode,
-			signal,
-			fetchOptions,
-		};
-		const generation = getGeneration(cache, state, url);
-		const {
-			isRangedRequest,
-			hasRequestHeaders,
-			hasNonDefaultRequestState,
-			fetchOptions: fetchOptionsWithHeaders,
-		} = await getGetRequestContext(fetchFunction, urlOrRequest, options, requestContext);
-		const retainStaleEntry = cacheMode === 'force-cache' || cacheMode === 'only-if-cached';
-		const currentTime = evictExpiredEntries(cache, state, retainStaleEntry ? url : undefined);
-		const isCacheableRequest = !isRangedRequest && !hasRequestHeaders && !hasNonDefaultRequestState;
+				const generation = getGeneration(cache, state, url);
+				return trackPending(resources, url, 'pendingInvalidationCount', async urlState => {
+					let didInvalidate = false;
+					const invalidate = () => {
+						if (didInvalidate) {
+							return;
+						}
 
-		signal?.throwIfAborted();
+						didInvalidate = true;
+						cache.delete(url);
+						urlState.generation = generation + 1;
+					};
 
-		const entry = cache.get(url);
-		const cachedResponse = isCacheableRequest
-			? getCachedResponse({
-				entry,
-				cacheMode,
-				currentTime,
-				isRangedRequest,
-			})
-			: undefined;
-		if (cachedResponse) {
-			return cachedResponse;
-		}
+					if (!fetchFunction[defersFetchStartSymbol]) {
+						invalidate();
+						return fetchFunction(urlOrRequest, fetchOptions);
+					}
 
-		if (cacheMode === 'only-if-cached') {
-			return new Response(undefined, {status: 504, statusText: 'Gateway Timeout'});
-		}
-
-		return trackPending(resources, url, 'pendingGetCount', async () => {
-			const response = await fetchFunction(urlOrRequest, fetchOptionsWithHeaders);
-			const isPartialResponse = response.status === 206;
-
-			// Only cache successful responses.
-			if (
-				response.ok
-				&& isCacheableRequest
-				&& !isPartialResponse
-				&& cacheMode !== 'no-store'
-				&& generation === getGeneration(cache, state, url)
-			) {
-				cache.set(url, {
-					generation,
-					response: response.clone(),
-					expiry: performance.now() + ttl,
+					return fetchFunction(urlOrRequest, {...fetchOptions, [notifyFetchStartSymbol]: invalidate});
 				});
 			}
 
-			return response;
-		});
-	};
+			const requestContext = {
+				method,
+				url,
+				cacheMode,
+				signal,
+				fetchOptions,
+			};
+			const generation = getGeneration(cache, state, url);
+			const {
+				isRangedRequest,
+				hasRequestHeaders,
+				hasNonDefaultRequestState,
+				fetchOptions: fetchOptionsWithHeaders,
+			} = await getGetRequestContext(fetchFunction, urlOrRequest, options, requestContext);
+			const retainStaleEntry = cacheMode === 'force-cache' || cacheMode === 'only-if-cached';
+			const currentTime = evictExpiredEntries(cache, state, retainStaleEntry ? url : undefined);
+			const isCacheableRequest = !isRangedRequest && !hasRequestHeaders && !hasNonDefaultRequestState;
 
-	return copyFetchMetadata(fetchWithCache, fetchFunction);
+			signal?.throwIfAborted();
+
+			const entry = cache.get(url);
+			const cachedResponse = isCacheableRequest
+				? getCachedResponse({
+					entry,
+					cacheMode,
+					currentTime,
+					isRangedRequest,
+				})
+				: undefined;
+			if (cachedResponse) {
+				return cachedResponse;
+			}
+
+			if (cacheMode === 'only-if-cached') {
+				return new Response(undefined, {status: 504, statusText: 'Gateway Timeout'});
+			}
+
+			return trackPending(resources, url, 'pendingGetCount', async () => {
+				const response = await fetchFunction(urlOrRequest, fetchOptionsWithHeaders);
+				const isPartialResponse = response.status === 206;
+
+				// Only cache successful responses.
+				if (
+					response.ok
+					&& isCacheableRequest
+					&& !isPartialResponse
+					&& cacheMode !== 'no-store'
+					&& generation === getGeneration(cache, state, url)
+				) {
+					cache.set(url, {
+						generation,
+						response: response.clone(),
+						expiry: performance.now() + ttl,
+					});
+				}
+
+				return response;
+			});
+		};
+
+		return copyFetchMetadata(fetchWithCache, fetchFunction);
+	};
 }

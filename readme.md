@@ -44,17 +44,17 @@ import {
 // - Parses JSON responses automatically
 const apiFetch = pipeline(
 	fetch,
-	f => withTimeout(f, 5000),
-	f => withBaseUrl(f, 'https://api.example.com'),
-	f => withHeaders(f, {Authorization: 'Bearer token'}),
-	withHttpError,
-	withJsonResponse,
+	withTimeout(5000),
+	withBaseUrl('https://api.example.com'),
+	withHeaders({Authorization: 'Bearer token'}),
+	withHttpError(),
+	withJsonResponse(),
 );
 
 const data = await apiFetch('/users');
 ```
 
-`pipeline()` order is the documented order throughout this package. Runtime wrapper nesting is the inverse, so `pipeline(fetch, f => withTimeout(f, 5000), f => withHeaders(f, headers))` becomes `withHeaders(withTimeout(fetch, 5000), headers)`.
+`pipeline()` order is the documented order throughout this package. Runtime wrapper nesting is the inverse, so `pipeline(fetch, withTimeout(5000), withHeaders(headers))` becomes `withHeaders(headers)(withTimeout(5000)(fetch))`.
 
 ## API
 

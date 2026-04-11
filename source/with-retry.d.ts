@@ -17,15 +17,14 @@ Requests with a one-shot body provided via `options.body`, such as a `ReadableSt
 
 If you need retry-time auth behavior, use a wrapper with explicit retry semantics such as `withTokenRefresh()`.
 
-@param fetchFunction - The fetch function to wrap (usually the global `fetch`).
 @param options - Retry configuration.
-@returns A wrapped fetch function with automatic retry.
+@returns A wrapper that takes a fetch function and returns a wrapped fetch function with automatic retry.
 
 @example
 ```
 import {withRetry} from 'fetch-extras';
 
-const fetchWithRetry = withRetry(fetch, {retries: 3});
+const fetchWithRetry = withRetry({retries: 3})(fetch);
 
 const response = await fetchWithRetry('https://api.example.com/data');
 const data = await response.json();
@@ -36,14 +35,14 @@ const data = await response.json();
 import {withRetry} from 'fetch-extras';
 
 // With a custom backoff and conditional retry
-const fetchWithRetry = withRetry(fetch, {
+const fetchWithRetry = withRetry({
 	retries: 5,
 	backoff: attemptNumber => attemptNumber * 1000, // Linear: 1s, 2s, 3s, ...
 	shouldRetry({response}) {
 		// Don't retry if the server says the resource is gone
 		return response?.status !== 410;
 	},
-});
+})(fetch);
 ```
 
 @example
@@ -52,17 +51,16 @@ import {pipeline, withHttpError, withRetry, withBaseUrl, withTimeout} from 'fetc
 
 const apiFetch = pipeline(
 	fetch,
-	f => withTimeout(f, 10_000),
-	f => withBaseUrl(f, 'https://api.example.com'),
-	f => withRetry(f, {retries: 2}),
-	withHttpError,
+	withTimeout(10_000),
+	withBaseUrl('https://api.example.com'),
+	withRetry({retries: 2}),
+	withHttpError(),
 );
 
 const response = await apiFetch('/users');
 ```
 */
 export function withRetry(
-	fetchFunction: typeof fetch,
 	options?: {
 		/**
 		Number of retries after the initial attempt. `retries: 2` means up to 3 total attempts.
@@ -76,14 +74,14 @@ export function withRetry(
 
 		@default ['GET', 'HEAD', 'PUT', 'DELETE', 'OPTIONS', 'TRACE']
 		*/
-		readonly methods?: string[];
+		readonly methods?: readonly string[];
 
 		/**
 		HTTP status codes that trigger a retry.
 
 		@default [408, 429, 500, 502, 503, 504]
 		*/
-		readonly statusCodes?: number[];
+		readonly statusCodes?: readonly number[];
 
 		/**
 		Maximum `Retry-After` duration in milliseconds. If the server requests a longer delay, the response is returned without retrying.
@@ -113,4 +111,4 @@ export function withRetry(
 			readonly retriesLeft: number;
 		}) => boolean | Promise<boolean>;
 	},
-): typeof fetch;
+): (fetchFunction: typeof fetch) => typeof fetch;

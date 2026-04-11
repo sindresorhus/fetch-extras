@@ -1,4 +1,6 @@
-# `withUploadProgress(fetchFunction, options?)`
+# withUploadProgress
+
+## withUploadProgress(options?)
 
 Wraps a fetch function with upload progress tracking.
 
@@ -8,13 +10,12 @@ When composing with `withTokenRefresh()`, place `withUploadProgress()` inside `w
 
 ## Parameters
 
-- `fetchFunction` (`typeof fetch`) - The fetch function to wrap (usually the global `fetch`).
 - `options` (optional)
 	- `onProgress` (`(progress: Progress) => void`) - Called as streamed request data is sent.
 
 ## Returns
 
-A wrapped fetch function that reports upload progress for explicit streamed bodies.
+A function that takes a fetch function and returns a wrapped fetch function that reports upload progress for explicit streamed bodies.
 
 ## Progress
 
@@ -29,11 +30,11 @@ The `Progress` object has the following properties:
 ```js
 import {withUploadProgress} from 'fetch-extras';
 
-const fetchWithUploadProgress = withUploadProgress(fetch, {
+const fetchWithUploadProgress = withUploadProgress({
 	onProgress(progress) {
 		console.log(`Upload: ${Math.round(progress.percent * 100)}%`);
 	},
-});
+})(fetch);
 
 await fetchWithUploadProgress('https://example.com/upload', {
 	method: 'POST',

@@ -35,7 +35,7 @@ const response = await throwIfHttpError(fetch('/api'));
 const data = await response.json();
 ```
 
-## withHttpError(fetchFunction)
+## withHttpError()
 
 Wraps a fetch function to automatically throw `HttpError` for non-2xx responses.
 
@@ -44,7 +44,7 @@ Can be combined with other `with*` functions.
 ```js
 import {withHttpError} from 'fetch-extras';
 
-const fetchWithError = withHttpError(fetch);
+const fetchWithError = withHttpError()(fetch);
 const response = await fetchWithError('/api'); // Throws HttpError for non-2xx responses
 const data = await response.json();
 ```

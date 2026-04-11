@@ -15,19 +15,21 @@ function responseTotalBytes(response, immutableHeaders) {
 	return Math.max(0, Number(response.headers.get('content-length')) || 0);
 }
 
-export function withDownloadProgress(fetchFunction, {onProgress} = {}) {
-	const fetchWithDownloadProgress = async (urlOrRequest, options = {}) => {
-		const response = await fetchFunction(urlOrRequest, options);
+export function withDownloadProgress({onProgress} = {}) {
+	return fetchFunction => {
+		const fetchWithDownloadProgress = async (urlOrRequest, options = {}) => {
+			const response = await fetchFunction(urlOrRequest, options);
 
-		if (onProgress && response.body) {
-			const immutableHeaders = isImmutableHeaders(response.headers);
-			const totalBytes = responseTotalBytes(response, immutableHeaders);
-			const trackedBody = isByteStream(response.body) ? trackByteProgress(response.body, totalBytes, onProgress) : trackProgress(response.body, totalBytes, onProgress);
-			return withResponseMetadata(response, trackedBody);
-		}
+			if (onProgress && response.body) {
+				const immutableHeaders = isImmutableHeaders(response.headers);
+				const totalBytes = responseTotalBytes(response, immutableHeaders);
+				const trackedBody = isByteStream(response.body) ? trackByteProgress(response.body, totalBytes, onProgress) : trackProgress(response.body, totalBytes, onProgress);
+				return withResponseMetadata(response, trackedBody);
+			}
 
-		return response;
+			return response;
+		};
+
+		return copyFetchMetadata(fetchWithDownloadProgress, fetchFunction);
 	};
-
-	return copyFetchMetadata(fetchWithDownloadProgress, fetchFunction);
 }

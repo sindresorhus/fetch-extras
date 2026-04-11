@@ -94,7 +94,7 @@ const createTimedResponseFetch = delay => async (_url, options = {}) => new Prom
 
 test('succeeds on first attempt without retry', async t => {
 	const mockFetch = createMockFetch([createResponse(200)]);
-	const fetchWithRetry = withRetry(mockFetch);
+	const fetchWithRetry = withRetry()(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 200);
@@ -106,7 +106,7 @@ test('retries on network error and succeeds', async t => {
 		networkError(),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {backoff: () => 0});
+	const fetchWithRetry = withRetry({backoff: () => 0})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 200);
@@ -118,7 +118,7 @@ test('retries on Failed to fetch hostname variant and succeeds', async t => {
 		new TypeError('Failed to fetch (example.com)'),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {backoff: () => 0});
+	const fetchWithRetry = withRetry({backoff: () => 0})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 200);
@@ -130,7 +130,7 @@ test('retries on network error and succeeds for Request input', async t => {
 		networkError(),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {backoff: () => 0});
+	const fetchWithRetry = withRetry({backoff: () => 0})(mockFetch);
 	const request = new Request('https://example.com');
 
 	const response = await fetchWithRetry(request);
@@ -143,7 +143,7 @@ test('retries on network error for Request input with overridden body', async t 
 		networkError(),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {backoff: () => 0});
+	const fetchWithRetry = withRetry({backoff: () => 0})(mockFetch);
 	const request = new Request('https://example.com', {method: 'PUT'});
 
 	const response = await fetchWithRetry(request, {body: 'data'});
@@ -156,7 +156,7 @@ test('retries on retriable status code and succeeds', async t => {
 		createResponse(503),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {backoff: () => 0});
+	const fetchWithRetry = withRetry({backoff: () => 0})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 200);
@@ -165,7 +165,7 @@ test('retries on retriable status code and succeeds', async t => {
 
 test('does not retry on non-retriable status code', async t => {
 	const mockFetch = createMockFetch([createResponse(400)]);
-	const fetchWithRetry = withRetry(mockFetch, {backoff: () => 0});
+	const fetchWithRetry = withRetry({backoff: () => 0})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 400);
@@ -174,7 +174,7 @@ test('does not retry on non-retriable status code', async t => {
 
 test('does not retry non-retriable methods by default', async t => {
 	const mockFetch = createMockFetch([createResponse(503)]);
-	const fetchWithRetry = withRetry(mockFetch, {backoff: () => 0});
+	const fetchWithRetry = withRetry({backoff: () => 0})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com', {method: 'POST'});
 	t.is(response.status, 503);
@@ -189,8 +189,8 @@ test('withHooks after withRetry reuses the same hooked request across retries', 
 	let beforeRequestCallCount = 0;
 	const fetchWithRetry = pipeline(
 		mockFetch,
-		fetchFunction => withRetry(fetchFunction, {backoff: () => 0}),
-		fetchFunction => withHooks(fetchFunction, {
+		withRetry({backoff: () => 0}),
+		withHooks({
 			beforeRequest({options}) {
 				beforeRequestCallCount++;
 				return {
@@ -224,7 +224,7 @@ test('withTimeout does not apply before custom request headers are resolved', as
 		return delayWithSignal(100, options.signal, new Headers({'x-test': '1'}));
 	};
 
-	const fetchWithRetry = withRetry(withTimeout(mockFetch, 10), {retries: 0});
+	const fetchWithRetry = withRetry({retries: 0})(withTimeout(10)(mockFetch));
 
 	const response = await fetchWithRetry('https://example.com');
 
@@ -234,7 +234,7 @@ test('withTimeout does not apply before custom request headers are resolved', as
 
 test('withTimeout budget starts when the fetch attempt begins, not while headers are resolving', async t => {
 	let callCount = 0;
-	const timedFetch = createTimedResponseFetch(5);
+	const timedFetch = createTimedResponseFetch(10);
 	const mockFetch = async (url, options = {}) => {
 		callCount++;
 		return timedFetch(url, options);
@@ -246,7 +246,7 @@ test('withTimeout budget starts when the fetch attempt begins, not while headers
 		return new Headers({'x-test': 'value'});
 	};
 
-	const fetchWithRetry = withRetry(withTimeout(mockFetch, 20), {retries: 0});
+	const fetchWithRetry = withRetry({retries: 0})(withTimeout(100)(mockFetch));
 
 	const response = await fetchWithRetry('https://example.com');
 
@@ -259,10 +259,10 @@ test('retries POST when added to methods', async t => {
 		createResponse(503),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		methods: ['POST'],
 		backoff: () => 0,
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com', {method: 'POST'});
 	t.is(response.status, 200);
@@ -274,7 +274,7 @@ test('methods are case-insensitive', async t => {
 		createResponse(503),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {backoff: () => 0});
+	const fetchWithRetry = withRetry({backoff: () => 0})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com', {method: 'get'});
 	t.is(response.status, 200);
@@ -288,7 +288,7 @@ test('respects retries count', async t => {
 		createResponse(503),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {retries: 2, backoff: () => 0});
+	const fetchWithRetry = withRetry({retries: 2, backoff: () => 0})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 503);
@@ -301,7 +301,7 @@ test('returns last response when all retries exhausted', async t => {
 		createResponse(502),
 		createResponse(503),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {retries: 2, backoff: () => 0});
+	const fetchWithRetry = withRetry({retries: 2, backoff: () => 0})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 503);
@@ -314,7 +314,7 @@ test('throws last error when all retries exhausted on network errors', async t =
 		networkError(),
 		networkError(),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {retries: 2, backoff: () => 0});
+	const fetchWithRetry = withRetry({retries: 2, backoff: () => 0})(mockFetch);
 
 	await t.throwsAsync(
 		() => fetchWithRetry('https://example.com'),
@@ -325,7 +325,7 @@ test('throws last error when all retries exhausted on network errors', async t =
 
 test('does not retry non-TypeError exceptions', async t => {
 	const mockFetch = createMockFetch([new Error('some error')]);
-	const fetchWithRetry = withRetry(mockFetch, {backoff: () => 0});
+	const fetchWithRetry = withRetry({backoff: () => 0})(mockFetch);
 
 	await t.throwsAsync(
 		() => fetchWithRetry('https://example.com'),
@@ -336,7 +336,7 @@ test('does not retry non-TypeError exceptions', async t => {
 
 test('retries: 0 means no retries', async t => {
 	const mockFetch = createMockFetch([createResponse(503)]);
-	const fetchWithRetry = withRetry(mockFetch, {retries: 0});
+	const fetchWithRetry = withRetry({retries: 0})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 503);
@@ -350,7 +350,7 @@ test('does not retry deterministic TypeErrors from invalid requests', async t =>
 		return fetch(...arguments_);
 	};
 
-	const fetchWithRetry = withRetry(countingFetch, {retries: 2, backoff: () => 0});
+	const fetchWithRetry = withRetry({retries: 2, backoff: () => 0})(countingFetch);
 
 	await t.throwsAsync(
 		() => fetchWithRetry('http://[invalid-url'),
@@ -369,7 +369,7 @@ test('does not snapshot stream bodies when retries are disabled', async t => {
 	});
 
 	const mockFetch = createMockFetch([createResponse(200)]);
-	const fetchWithRetry = withRetry(mockFetch, {retries: 0});
+	const fetchWithRetry = withRetry({retries: 0})(mockFetch);
 
 	await fetchWithRetry('https://example.com', {method: 'PUT', body: streamBody});
 	t.is(mockFetch.callCount, 1);
@@ -381,7 +381,7 @@ test('does not retry ReadableStream bodies', async t => {
 		createResponse(503),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {backoff: () => 0});
+	const fetchWithRetry = withRetry({backoff: () => 0})(mockFetch);
 	const body = new ReadableStream({
 		start(controller) {
 			controller.enqueue(new TextEncoder().encode('hello'));
@@ -404,7 +404,7 @@ test('does not retry AsyncIterable bodies', async t => {
 		createResponse(503),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {backoff: () => 0});
+	const fetchWithRetry = withRetry({backoff: () => 0})(mockFetch);
 	const body = {
 		async * [Symbol.asyncIterator]() {
 			yield new TextEncoder().encode('hello');
@@ -429,13 +429,13 @@ test('custom backoff function is called with correct attempt number', async t =>
 		createResponse(503),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		retries: 3,
 		backoff(attemptNumber) {
 			backoffCalls.push(attemptNumber);
 			return 0;
 		},
-	});
+	})(mockFetch);
 
 	await fetchWithRetry('https://example.com');
 	t.deepEqual(backoffCalls, [1, 2]);
@@ -446,7 +446,7 @@ test('Retry-After header with integer seconds retries', async t => {
 		createResponse(429, {'Retry-After': '0'}),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {backoff: () => 0});
+	const fetchWithRetry = withRetry({backoff: () => 0})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 200);
@@ -459,12 +459,12 @@ test('Retry-After: 0 uses zero delay instead of backoff', async t => {
 		createResponse(429, {'Retry-After': '0'}),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		backoff() {
 			backoffCalled = true;
 			return 0;
 		},
-	});
+	})(mockFetch);
 
 	await fetchWithRetry('https://example.com');
 	t.false(backoffCalled);
@@ -475,10 +475,10 @@ test('Retry-After exceeding maxRetryAfter stops retry', async t => {
 		createResponse(429, {'Retry-After': '120'}),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		maxRetryAfter: 60_000,
 		backoff: () => 0,
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 429);
@@ -490,10 +490,10 @@ test('shouldRetry returning false stops retry on network error', async t => {
 		networkError(),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		backoff: () => 0,
 		shouldRetry: () => false,
-	});
+	})(mockFetch);
 
 	await t.throwsAsync(
 		() => fetchWithRetry('https://example.com'),
@@ -507,10 +507,10 @@ test('shouldRetry returning false stops retry on status code', async t => {
 		createResponse(503),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		backoff: () => 0,
 		shouldRetry: () => false,
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 503);
@@ -523,14 +523,14 @@ test('shouldRetry receives correct context for network error', async t => {
 		networkError(),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		retries: 3,
 		backoff: () => 0,
 		shouldRetry(context) {
 			contexts.push(context);
 			return true;
 		},
-	});
+	})(mockFetch);
 
 	await fetchWithRetry('https://example.com');
 
@@ -548,7 +548,7 @@ test('shouldRetry receives correct context for status code retry', async t => {
 		createResponse(502),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		retries: 3,
 		backoff: () => 0,
 		shouldRetry(context) {
@@ -560,7 +560,7 @@ test('shouldRetry receives correct context for status code retry', async t => {
 			});
 			return true;
 		},
-	});
+	})(mockFetch);
 
 	await fetchWithRetry('https://example.com');
 
@@ -582,10 +582,10 @@ test('async shouldRetry is supported', async t => {
 		createResponse(503),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		backoff: () => 0,
 		shouldRetry: () => Promise.resolve(true),
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 200);
@@ -597,9 +597,9 @@ test('abort signal cancels during backoff', async t => {
 		createResponse(200),
 	]);
 	const controller = new AbortController();
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		backoff: () => 60_000,
-	});
+	})(mockFetch);
 
 	setTimeout(() => {
 		controller.abort();
@@ -614,7 +614,7 @@ test('abort signal cancels during backoff', async t => {
 
 test('does not retry bare Request body', async t => {
 	const mockFetch = createMockFetch([createResponse(503)]);
-	const fetchWithRetry = withRetry(mockFetch, {backoff: () => 0});
+	const fetchWithRetry = withRetry({backoff: () => 0})(mockFetch);
 	const request = new Request('https://example.com', {
 		method: 'PUT',
 		body: 'data',
@@ -630,7 +630,7 @@ test('retries when body is provided in options (replayable)', async t => {
 		createResponse(503),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {backoff: () => 0});
+	const fetchWithRetry = withRetry({backoff: () => 0})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com', {
 		method: 'PUT',
@@ -656,8 +656,8 @@ test('preserves withUploadProgress when wrapping streamed uploads', async t => {
 
 	const fetchWithRetry = pipeline(
 		mockFetch,
-		f => withRetry(f, {retries: 1, backoff: () => 0}),
-		f => withUploadProgress(f, {
+		withRetry({retries: 1, backoff: () => 0}),
+		withUploadProgress({
 			onProgress(progress) {
 				progressEvents.push(progress);
 			},
@@ -697,7 +697,7 @@ test('Request body overrides preserve explicit Request body headers across retry
 		},
 	});
 
-	const fetchWithRetry = withRetry(mockFetch, {backoff: () => 0});
+	const fetchWithRetry = withRetry({backoff: () => 0})(mockFetch);
 	const formData = createFormDataBody();
 	const request = createBodyOverrideRequest({
 		'content-type': 'text/plain;charset=UTF-8',
@@ -720,7 +720,7 @@ test('Request body overrides preserve explicit Request body headers across retry
 		},
 	});
 
-	const fetchWithRetry = withRetry(withHeaders(mockFetch, {'x-default': 'value'}), {backoff: () => 0});
+	const fetchWithRetry = withRetry({backoff: () => 0})(withHeaders({'x-default': 'value'})(mockFetch));
 	const formData = createFormDataBody();
 	const request = createBodyOverrideRequest({
 		'content-type': 'text/plain;charset=UTF-8',
@@ -742,9 +742,9 @@ test('Request body overrides retry through async withHeaders defaults', async t 
 		},
 	});
 
-	const fetchWithRetry = withRetry(withHeaders(mockFetch, async () => ({
+	const fetchWithRetry = withRetry({backoff: () => 0})(withHeaders(async () => ({
 		'x-default': 'value',
-	})), {backoff: () => 0});
+	}))(mockFetch));
 	const request = createBodyOverrideRequest({
 		'content-type': 'text/plain;charset=UTF-8',
 		'content-length': '999',
@@ -766,12 +766,12 @@ test('Request body overrides re-run async withHeaders defaults across retry atte
 		},
 	});
 
-	const fetchWithRetry = withRetry(withHeaders(mockFetch, async () => {
+	const fetchWithRetry = withRetry({backoff: () => 0})(withHeaders(async () => {
 		defaultHeaderNumber++;
 		return {
 			'x-default': `value-${defaultHeaderNumber}`,
 		};
-	}), {backoff: () => 0});
+	})(mockFetch));
 	const request = createBodyOverrideRequest({
 		'content-type': 'text/plain;charset=UTF-8',
 		'content-length': '999',
@@ -793,12 +793,12 @@ test('bodyless requests re-run async withHeaders defaults across retry attempts'
 		},
 	});
 
-	const fetchWithRetry = withRetry(withHeaders(mockFetch, async () => {
+	const fetchWithRetry = withRetry({backoff: () => 0})(withHeaders(async () => {
 		defaultHeaderNumber++;
 		return {
 			'x-default': `value-${defaultHeaderNumber}`,
 		};
-	}), {backoff: () => 0});
+	})(mockFetch));
 
 	const response = await fetchWithRetry('https://example.com/api');
 
@@ -820,13 +820,13 @@ test('bodyless requests rerun nested async withHeaders resolvers across retry at
 		});
 	};
 
-	const fetchWithRetry = withRetry(withHeaders(withHeaders(mockFetch, async () => {
-		innerCallCount++;
-		return {'x-inner': String(innerCallCount)};
-	}), async () => {
+	const fetchWithRetry = withRetry({backoff: () => 0})(withHeaders(async () => {
 		outerCallCount++;
 		return {'x-outer': String(outerCallCount)};
-	}), {backoff: () => 0});
+	})(withHeaders(async () => {
+		innerCallCount++;
+		return {'x-inner': String(innerCallCount)};
+	})(mockFetch)));
 
 	const response = await fetchWithRetry('https://example.com/api');
 
@@ -848,7 +848,7 @@ test('bodyless requests re-run empty async withHeaders defaults across retry att
 		},
 	});
 
-	const fetchWithRetry = withRetry(withHeaders(mockFetch, async () => defaultHeaders.shift() ?? {}), {backoff: () => 0});
+	const fetchWithRetry = withRetry({backoff: () => 0})(withHeaders(async () => defaultHeaders.shift() ?? {})(mockFetch));
 
 	const response = await fetchWithRetry('https://example.com/api');
 
@@ -866,7 +866,7 @@ test('Request body overrides preserve explicit Request body headers across retry
 		},
 	});
 
-	const fetchWithRetry = withHeaders(withRetry(mockFetch, {backoff: () => 0}), {'x-default': 'value'});
+	const fetchWithRetry = withHeaders({'x-default': 'value'})(withRetry({backoff: () => 0})(mockFetch));
 	const formData = createFormDataBody();
 	const request = createBodyOverrideRequest({
 		'content-type': 'text/plain;charset=UTF-8',
@@ -889,7 +889,7 @@ test('Request body overrides keep explicit replacement body headers and original
 		},
 	});
 
-	const fetchWithRetry = withRetry(mockFetch, {backoff: () => 0});
+	const fetchWithRetry = withRetry({backoff: () => 0})(mockFetch);
 	const request = createBodyOverrideRequest({
 		'content-type': 'text/plain;charset=UTF-8',
 		'content-language': 'en',
@@ -925,7 +925,7 @@ test('Request body overrides preserve original Request non-body headers on retry
 		},
 	});
 
-	const fetchWithRetry = withRetry(mockFetch, {backoff: () => 0});
+	const fetchWithRetry = withRetry({backoff: () => 0})(mockFetch);
 	const request = new Request('https://example.com', {
 		method: 'PUT',
 		body: 'original',
@@ -959,7 +959,7 @@ test('Request body overrides preserve explicit Request body headers on retry whe
 		},
 	});
 
-	const fetchWithRetry = withRetry(mockFetch, {backoff: () => 0});
+	const fetchWithRetry = withRetry({backoff: () => 0})(mockFetch);
 	const request = createBodyOverrideRequest({
 		'content-type': 'application/json',
 		'content-language': 'fr',
@@ -995,12 +995,12 @@ test('Request body overrides preserve outer withHeaders body defaults across eve
 		},
 	});
 
-	const fetchWithRetry = withHeaders(withRetry(mockFetch, {backoff: () => 0}), {
+	const fetchWithRetry = withHeaders({
 		'content-type': 'application/default',
 		'content-language': 'fr',
 		'content-length': '123',
 		'x-default': 'yes',
-	});
+	})(withRetry({backoff: () => 0})(mockFetch));
 	const request = createBodyOverrideRequest(undefined, new Uint8Array([1, 2, 3]));
 
 	const response = await fetchWithRetry(request, {
@@ -1029,12 +1029,12 @@ test('Request body overrides preserve explicit replacement body headers over out
 		},
 	});
 
-	const fetchWithRetry = withHeaders(withRetry(mockFetch, {backoff: () => 0}), {
+	const fetchWithRetry = withHeaders({
 		'content-type': 'application/default',
 		'content-language': 'fr',
 		'content-length': '123',
 		'x-default': 'yes',
-	});
+	})(withRetry({backoff: () => 0})(mockFetch));
 	const request = createBodyOverrideRequest(undefined, new Uint8Array([1, 2, 3]));
 
 	const response = await fetchWithRetry(request, {
@@ -1070,17 +1070,17 @@ test('Request body overrides preserve explicit replacement body headers over nes
 		},
 	});
 
-	const fetchWithRetry = withHeaders(withHeaders(withRetry(mockFetch, {backoff: () => 0}), {
-		'Content-Type': 'application/inner-default',
-		'Content-Language': 'nb',
-		'Content-Length': '321',
-		'X-Inner-Default': 'yes',
-	}), {
+	const fetchWithRetry = withHeaders({
 		'content-type': 'application/outer-default',
 		'content-language': 'fr',
 		'content-length': '123',
 		'x-outer-default': 'yes',
-	});
+	})(withHeaders({
+		'Content-Type': 'application/inner-default',
+		'Content-Language': 'nb',
+		'Content-Length': '321',
+		'X-Inner-Default': 'yes',
+	})(withRetry({backoff: () => 0})(mockFetch)));
 	const request = createBodyOverrideRequest(undefined, new Uint8Array([1, 2, 3]));
 
 	const response = await fetchWithRetry(request, {
@@ -1117,11 +1117,11 @@ test('Request body overrides preserve explicit Request body headers across retry
 		},
 	});
 
-	const fetchWithRetry = withHeaders(withHeaders(withRetry(mockFetch, {backoff: () => 0}), {
-		'x-inner-default': 'yes',
-	}), {
+	const fetchWithRetry = withHeaders({
 		'x-outer-default': 'yes',
-	});
+	})(withHeaders({
+		'x-inner-default': 'yes',
+	})(withRetry({backoff: () => 0})(mockFetch)));
 	const formData = createFormDataBody();
 	const request = createBodyOverrideRequest({
 		'content-type': 'text/plain;charset=UTF-8',
@@ -1152,8 +1152,8 @@ test('withJsonBody Request body overrides preserve the resolved JSON body header
 
 	const fetchWithRetry = pipeline(
 		mockFetch,
-		withJsonBody,
-		f => withRetry(f, {backoff: () => 0}),
+		withJsonBody(),
+		withRetry({backoff: () => 0}),
 	);
 	const request = createBodyOverrideRequest({
 		'content-type': 'text/plain;charset=UTF-8',
@@ -1178,8 +1178,8 @@ test('withJsonBody Request body overrides replace Blob-derived Content-Type acro
 
 	const fetchWithRetry = pipeline(
 		mockFetch,
-		withJsonBody,
-		f => withRetry(f, {backoff: () => 0}),
+		withJsonBody(),
+		withRetry({backoff: () => 0}),
 	);
 	const request = createBodyOverrideRequest({
 		'content-type': 'image/png',
@@ -1202,9 +1202,9 @@ test('withJsonBody Request body overrides preserve withHeaders Content-Type defa
 
 	const fetchWithRetry = pipeline(
 		mockFetch,
-		f => withHeaders(f, {'content-type': 'application/vnd.api+json'}),
-		withJsonBody,
-		f => withRetry(f, {backoff: () => 0}),
+		withHeaders({'content-type': 'application/vnd.api+json'}),
+		withJsonBody(),
+		withRetry({backoff: () => 0}),
 	);
 	const request = createBodyOverrideRequest({
 		'content-type': 'text/plain;charset=UTF-8',
@@ -1230,8 +1230,8 @@ test('withJsonBody Request body overrides preserve the resolved header set acros
 
 	const fetchWithRetry = pipeline(
 		mockFetch,
-		withJsonBody,
-		f => withRetry(f, {backoff: () => 0}),
+		withJsonBody(),
+		withRetry({backoff: () => 0}),
 	);
 	const request = createBodyOverrideRequest({
 		'content-type': 'text/plain;charset=UTF-8',
@@ -1259,9 +1259,9 @@ test('withJsonBody Request body overrides preserve explicit per-call Content-Typ
 
 	const fetchWithRetry = pipeline(
 		mockFetch,
-		f => withHeaders(f, {'content-type': 'application/vnd.api+json'}),
-		withJsonBody,
-		f => withRetry(f, {backoff: () => 0}),
+		withHeaders({'content-type': 'application/vnd.api+json'}),
+		withJsonBody(),
+		withRetry({backoff: () => 0}),
 	);
 	const request = createBodyOverrideRequest({
 		'content-type': 'text/plain;charset=UTF-8',
@@ -1287,8 +1287,8 @@ test('withJsonBody Request body overrides preserve explicit Headers Content-Type
 
 	const fetchWithRetry = pipeline(
 		mockFetch,
-		withJsonBody,
-		f => withRetry(f, {backoff: () => 0}),
+		withJsonBody(),
+		withRetry({backoff: () => 0}),
 	);
 	const request = createBodyOverrideRequest({
 		'content-type': 'text/plain;charset=UTF-8',
@@ -1315,8 +1315,8 @@ test('withJsonBody Request body overrides preserve tuple Content-Type across ret
 
 	const fetchWithRetry = pipeline(
 		mockFetch,
-		withJsonBody,
-		f => withRetry(f, {backoff: () => 0}),
+		withJsonBody(),
+		withRetry({backoff: () => 0}),
 	);
 	const request = createBodyOverrideRequest({
 		'content-type': 'text/plain;charset=UTF-8',
@@ -1346,8 +1346,8 @@ test('withJsonBody URL inputs serialize the body once and reuse it on each retry
 
 	const fetchWithRetry = pipeline(
 		mockFetch,
-		withJsonBody,
-		f => withRetry(f, {
+		withJsonBody(),
+		withRetry({
 			backoff: () => 0,
 			methods: ['POST'],
 		}),
@@ -1383,10 +1383,10 @@ test('custom resolved request bodies are replayed once across retries', async t 
 		return `${options.body}:${resolveCount}`;
 	};
 
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		backoff: () => 0,
 		methods: ['POST'],
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com', {
 		method: 'POST',
@@ -1422,10 +1422,10 @@ test('synthesized resolved bodies preserve separately resolved headers across re
 		return new Headers({'content-type': 'application/json'});
 	};
 
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		backoff: () => 0,
 		methods: ['POST'],
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com', {method: 'POST'});
 
@@ -1442,14 +1442,14 @@ test('async withHeaders resolution is aborted while retry pre-resolves headers',
 		notifyStarted = resolve;
 	});
 	const mockFetch = async () => new Response(null, {status: 200});
-	const fetchWithRetry = withRetry(withHeaders(mockFetch, async () => {
+	const fetchWithRetry = withRetry({
+		backoff: () => 0,
+	})(withHeaders(async () => {
 		notifyStarted();
 		return new Promise(resolve => {
 			resolveDefaultHeaders = resolve;
 		});
-	}), {
-		backoff: () => 0,
-	});
+	})(mockFetch));
 
 	const pendingRequest = fetchWithRetry('https://example.com', {signal: abortController.signal});
 	await started;
@@ -1469,10 +1469,10 @@ test('function-based withHeaders defaults rerun when the inner fetch has no reso
 		return new Response(null, {status: fetchCallCount === 1 ? 500 : 200});
 	};
 
-	const fetchWithRetry = withRetry(withHeaders(bareFetch, async () => {
+	const fetchWithRetry = withRetry({backoff: () => 0})(withHeaders(async () => {
 		resolverCallCount++;
 		return {'x-dynamic': `value-${resolverCallCount}`};
-	}), {backoff: () => 0});
+	})(bareFetch));
 
 	const response = await fetchWithRetry('https://example.com/api');
 
@@ -1497,11 +1497,11 @@ test('one-shot resolved request bodies are not retried', async t => {
 		return body;
 	};
 
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		backoff: () => 0,
 		methods: ['POST'],
 		retries: 1,
-	});
+	})(mockFetch);
 
 	await t.throwsAsync(
 		() => fetchWithRetry('https://example.com', {method: 'POST'}),
@@ -1534,10 +1534,10 @@ test('custom resolved request bodies are replayed once across retries for Reques
 		return `${options.body}:${resolveCount}`;
 	};
 
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		backoff: () => 0,
 		methods: ['PUT'],
-	});
+	})(mockFetch);
 	const request = new Request('https://example.com', {
 		method: 'PUT',
 		body: 'original',
@@ -1584,10 +1584,10 @@ test('custom resolved Request body overrides preserve merged headers across retr
 		return `${options.body}:${resolveCount}`;
 	};
 
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		backoff: () => 0,
 		methods: ['PUT'],
-	});
+	})(mockFetch);
 	const request = new Request('https://example.com', {
 		method: 'PUT',
 		body: 'original',
@@ -1625,8 +1625,8 @@ test('composes with withHttpError in pipeline', async t => {
 	]);
 	const apiFetch = pipeline(
 		mockFetch,
-		f => withRetry(f, {backoff: () => 0}),
-		withHttpError,
+		withRetry({backoff: () => 0}),
+		withHttpError(),
 	);
 
 	const response = await apiFetch('https://example.com');
@@ -1641,8 +1641,8 @@ test('retries network errors when composed outside withBaseUrl for relative URLs
 	]);
 	const apiFetch = pipeline(
 		mockFetch,
-		f => withBaseUrl(f, 'https://api.example.com'),
-		f => withRetry(f, {backoff: () => 0}),
+		withBaseUrl('https://api.example.com'),
+		withRetry({backoff: () => 0}),
 	);
 
 	const response = await apiFetch('/users');
@@ -1671,7 +1671,7 @@ test('does not retry timeout errors from withTimeout wrappers', async t => {
 		});
 	};
 
-	const fetchWithRetry = withRetry(withTimeout(timedFetch, 1), {retries: 1, backoff: () => 0});
+	const fetchWithRetry = withRetry({retries: 1, backoff: () => 0})(withTimeout(1)(timedFetch));
 
 	const error = await t.throwsAsync(
 		() => fetchWithRetry('https://example.com'),
@@ -1688,12 +1688,12 @@ test('withTimeout applies while retry pre-resolves async headers', async t => {
 		return new Response(null, {status: 200});
 	};
 
-	const fetchWithRetry = withRetry(withTimeout(withHeaders(mockFetch, async () => new Promise(resolve => {
-		setTimeout(resolve, 100, {'x-test': '1'});
-	})), 10), {
+	const fetchWithRetry = withRetry({
 		retries: 1,
 		backoff: () => 0,
-	});
+	})(withTimeout(10)(withHeaders(async () => new Promise(resolve => {
+		setTimeout(resolve, 100, {'x-test': '1'});
+	}))(mockFetch)));
 
 	const error = await t.throwsAsync(() => fetchWithRetry('https://example.com'));
 
@@ -1719,12 +1719,12 @@ test('withTimeout reuses one timeout budget across retry header pre-resolution a
 		});
 	};
 
-	const fetchWithRetry = withRetry(withTimeout(withJsonBody(withHeaders(mockFetch, async () => new Promise(resolve => {
-		setTimeout(resolve, 20, {'x-test': '1'});
-	}))), 50), {
+	const fetchWithRetry = withRetry({
 		retries: 0,
 		methods: ['POST'],
-	});
+	})(withTimeout(50)(withJsonBody()(withHeaders(async () => new Promise(resolve => {
+		setTimeout(resolve, 20, {'x-test': '1'});
+	}))(mockFetch))));
 
 	const error = await t.throwsAsync(() => fetchWithRetry('https://example.com', {
 		method: 'POST',
@@ -1747,7 +1747,7 @@ test('withTimeout aborts retry backoff before the next attempt starts', async t 
 		return new Response(null, {status: 503});
 	};
 
-	const fetchWithRetry = withRetry(withTimeout(mockFetch, 50), {retries: 1, backoff: () => 100});
+	const fetchWithRetry = withRetry({retries: 1, backoff: () => 100})(withTimeout(50)(mockFetch));
 
 	const error = await t.throwsAsync(
 		() => fetchWithRetry('https://example.com'),
@@ -1774,7 +1774,7 @@ test('does not retry ReadableStream bodies when wrapping withTimeout', async t =
 		});
 	};
 
-	const fetchWithRetry = withRetry(withTimeout(timedFetch, 10), {retries: 1, backoff: () => 0});
+	const fetchWithRetry = withRetry({retries: 1, backoff: () => 0})(withTimeout(10)(timedFetch));
 	const streamBody = new ReadableStream({
 		start(controller) {
 			controller.enqueue(new TextEncoder().encode('hello'));
@@ -1809,7 +1809,7 @@ test('does not retry caller aborts when wrapping withTimeout', async t => {
 	};
 
 	const abortController = new AbortController();
-	const fetchWithRetry = withRetry(withTimeout(timedFetch, 1000), {retries: 1, backoff: () => 0});
+	const fetchWithRetry = withRetry({retries: 1, backoff: () => 0})(withTimeout(1000)(timedFetch));
 	abortController.abort(new Error('caller aborted'));
 
 	await t.throwsAsync(
@@ -1824,7 +1824,7 @@ test('propagates metadata via copyFetchMetadata', t => {
 	const mockFetch = createMockFetch([createResponse(200)]);
 	mockFetch[timeoutDurationSymbol] = 5000;
 
-	const fetchWithRetry = withRetry(mockFetch);
+	const fetchWithRetry = withRetry()(mockFetch);
 	t.is(fetchWithRetry[timeoutDurationSymbol], 5000);
 });
 
@@ -1833,10 +1833,10 @@ test('custom statusCodes option', async t => {
 		createResponse(418),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		statusCodes: [418],
 		backoff: () => 0,
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 200);
@@ -1845,10 +1845,10 @@ test('custom statusCodes option', async t => {
 
 test('default status codes are not retried when custom statusCodes overrides them', async t => {
 	const mockFetch = createMockFetch([createResponse(503)]);
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		statusCodes: [418],
 		backoff: () => 0,
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 503);
@@ -1856,12 +1856,12 @@ test('default status codes are not retried when custom statusCodes overrides the
 });
 
 test('throws on invalid retries value', t => {
-	t.throws(() => withRetry(fetch, {retries: -1}), {
+	t.throws(() => withRetry({retries: -1})(fetch), {
 		instanceOf: TypeError,
 		message: '`retries` must be a non-negative integer.',
 	});
 
-	t.throws(() => withRetry(fetch, {retries: 1.5}), {
+	t.throws(() => withRetry({retries: 1.5})(fetch), {
 		instanceOf: TypeError,
 		message: '`retries` must be a non-negative integer.',
 	});
@@ -1869,7 +1869,7 @@ test('throws on invalid retries value', t => {
 
 test('extracts method from Request object', async t => {
 	const mockFetch = createMockFetch([createResponse(503)]);
-	const fetchWithRetry = withRetry(mockFetch, {backoff: () => 0});
+	const fetchWithRetry = withRetry({backoff: () => 0})(mockFetch);
 
 	const request = new Request('https://example.com', {method: 'POST'});
 	const response = await fetchWithRetry(request, {});
@@ -1882,7 +1882,7 @@ test('defaults to GET method when not specified', async t => {
 		createResponse(503),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {backoff: () => 0});
+	const fetchWithRetry = withRetry({backoff: () => 0})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 200);
@@ -1894,7 +1894,7 @@ const verifyRetriableStatus = async (t, status) => {
 		createResponse(status),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {backoff: () => 0});
+	const fetchWithRetry = withRetry({backoff: () => 0})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 200);
@@ -1912,13 +1912,13 @@ test('Retry-After with HTTP-date format', async t => {
 		createResponse(429, {'Retry-After': futureDate}),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		maxRetryAfter: 10_000,
 		backoff() {
 			backoffCalled = true;
 			return 0;
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 200);
@@ -1933,12 +1933,12 @@ test('Retry-After with past HTTP-date falls back to backoff', async t => {
 		createResponse(429, {'Retry-After': pastDate}),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		backoff() {
 			backoffCalled = true;
 			return 0;
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 200);
@@ -1951,12 +1951,12 @@ test('Retry-After with invalid string falls back to backoff', async t => {
 		createResponse(429, {'Retry-After': 'garbage'}),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		backoff() {
 			backoffCalled = true;
 			return 0;
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 200);
@@ -1969,12 +1969,12 @@ test('Retry-After with fractional seconds falls back to backoff', async t => {
 		createResponse(429, {'Retry-After': '0.5'}),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		backoff() {
 			backoffCalled = true;
 			return 0;
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 200);
@@ -1987,12 +1987,12 @@ test('Retry-After with scientific notation falls back to backoff', async t => {
 		createResponse(429, {'Retry-After': '1e3'}),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		backoff() {
 			backoffCalled = true;
 			return 0;
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 200);
@@ -2005,12 +2005,12 @@ test('Retry-After with hexadecimal number falls back to backoff', async t => {
 		createResponse(429, {'Retry-After': '0x10'}),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		backoff() {
 			backoffCalled = true;
 			return 0;
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 200);
@@ -2023,12 +2023,12 @@ test('Retry-After with leading plus sign falls back to backoff', async t => {
 		createResponse(429, {'Retry-After': '+5'}),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		backoff() {
 			backoffCalled = true;
 			return 0;
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 200);
@@ -2037,7 +2037,7 @@ test('Retry-After with leading plus sign falls back to backoff', async t => {
 
 test('retries: 0 does not retry network errors', async t => {
 	const mockFetch = createMockFetch([networkError()]);
-	const fetchWithRetry = withRetry(mockFetch, {retries: 0});
+	const fetchWithRetry = withRetry({retries: 0})(mockFetch);
 
 	await t.throwsAsync(
 		() => fetchWithRetry('https://example.com'),
@@ -2052,7 +2052,7 @@ test('retries: 1 makes exactly 2 total attempts', async t => {
 		createResponse(503),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {retries: 1, backoff: () => 0});
+	const fetchWithRetry = withRetry({retries: 1, backoff: () => 0})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 503);
@@ -2064,12 +2064,12 @@ test('async shouldRetry returning false stops retry', async t => {
 		createResponse(503),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		backoff: () => 0,
 		async shouldRetry() {
 			return false;
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 503);
@@ -2082,12 +2082,12 @@ test('negative Retry-After integer falls back to backoff', async t => {
 		createResponse(429, {'Retry-After': '-5'}),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		backoff() {
 			backoffCalled = true;
 			return 0;
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 200);
@@ -2099,10 +2099,10 @@ test('Retry-After exactly at maxRetryAfter still retries', async t => {
 		createResponse(429, {'Retry-After': '1'}),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		maxRetryAfter: 1000,
 		backoff: () => 0,
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 200);
@@ -2114,7 +2114,7 @@ test('retries with URL object input', async t => {
 		createResponse(503),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {backoff: () => 0});
+	const fetchWithRetry = withRetry({backoff: () => 0})(mockFetch);
 
 	const response = await fetchWithRetry(new URL('https://example.com'));
 	t.is(response.status, 200);
@@ -2127,7 +2127,7 @@ test('handles mixed network error then status code error across retries', async 
 		createResponse(503),
 		createResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {retries: 3, backoff: () => 0});
+	const fetchWithRetry = withRetry({retries: 3, backoff: () => 0})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 200);
@@ -2155,7 +2155,7 @@ test('discards intermediate response bodies between retries', async t => {
 		createCancelableResponse(503),
 		createCancelableResponse(200),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {retries: 3, backoff: () => 0});
+	const fetchWithRetry = withRetry({retries: 3, backoff: () => 0})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 200);
@@ -2176,12 +2176,12 @@ test('discards retried response bodies when shouldRetry throws', async t => {
 	}), {status: 503});
 	const shouldRetryError = new Error('shouldRetry failed');
 	const mockFetch = createMockFetch([response]);
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		backoff: () => 0,
 		shouldRetry() {
 			throw shouldRetryError;
 		},
-	});
+	})(mockFetch);
 
 	const error = await t.throwsAsync(fetchWithRetry('https://example.com'));
 
@@ -2194,7 +2194,7 @@ test('methods: [] prevents all retries', async t => {
 	const mockFetch = createMockFetch([
 		createResponse(503),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {methods: [], backoff: () => 0});
+	const fetchWithRetry = withRetry({methods: [], backoff: () => 0})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 503);
@@ -2205,7 +2205,7 @@ test('statusCodes: [] means only network errors trigger retry', async t => {
 	const mockFetch = createMockFetch([
 		createResponse(503),
 	]);
-	const fetchWithRetry = withRetry(mockFetch, {statusCodes: [], backoff: () => 0});
+	const fetchWithRetry = withRetry({statusCodes: [], backoff: () => 0})(mockFetch);
 
 	// 503 should not be retried with empty statusCodes
 	const response = await fetchWithRetry('https://example.com');
@@ -2217,7 +2217,7 @@ test('statusCodes: [] means only network errors trigger retry', async t => {
 		networkError(),
 		createResponse(200),
 	]);
-	const fetchWithRetry2 = withRetry(mockFetch2, {statusCodes: [], backoff: () => 0});
+	const fetchWithRetry2 = withRetry({statusCodes: [], backoff: () => 0})(mockFetch2);
 
 	const response2 = await fetchWithRetry2('https://example.com');
 	t.is(response2.status, 200);
@@ -2235,7 +2235,7 @@ test('abort signal during async shouldRetry rejects before shouldRetry settles',
 		resolveShouldRetry = resolve;
 	});
 
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		retries: 2,
 		backoff: () => 5000,
 		async shouldRetry() {
@@ -2245,7 +2245,7 @@ test('abort signal during async shouldRetry rejects before shouldRetry settles',
 			});
 			return true;
 		},
-	});
+	})(mockFetch);
 
 	const fetchPromise = fetchWithRetry('https://example.com', {signal: controller.signal});
 
@@ -2271,13 +2271,13 @@ test('abort signal during async shouldRetry rejects before shouldRetry settles',
 test('retries: 0 never invokes shouldRetry', async t => {
 	let shouldRetryCalled = false;
 	const mockFetch = createMockFetch([createResponse(503)]);
-	const fetchWithRetry = withRetry(mockFetch, {
+	const fetchWithRetry = withRetry({
 		retries: 0,
 		shouldRetry() {
 			shouldRetryCalled = true;
 			return true;
 		},
-	});
+	})(mockFetch);
 
 	const response = await fetchWithRetry('https://example.com');
 	t.is(response.status, 503);

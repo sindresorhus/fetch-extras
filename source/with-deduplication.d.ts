@@ -11,14 +11,13 @@ Deduplication only applies when you call the wrapper with a URL and no non-empty
 
 In documented `pipeline()` order, place `withDeduplication` after `withBaseUrl` so the deduplication key is the resolved absolute URL.
 
-@param fetchFunction - The fetch function to wrap (usually the global `fetch`).
-@returns A wrapped fetch function that deduplicates concurrent plain GET URL requests.
+@returns A function that accepts a fetch function and returns a wrapped fetch function that deduplicates concurrent plain GET URL requests.
 
 @example
 ```
 import {withDeduplication} from 'fetch-extras';
 
-const deduplicatedFetch = withDeduplication(fetch);
+const deduplicatedFetch = withDeduplication()(fetch);
 
 // These two concurrent requests result in only one network call
 const [response1, response2] = await Promise.all([
@@ -33,14 +32,12 @@ import {pipeline, withHttpError, withDeduplication, withBaseUrl} from 'fetch-ext
 
 const apiFetch = pipeline(
 	fetch,
-	f => withBaseUrl(f, 'https://api.example.com'),
-	withDeduplication,
-	withHttpError,
+	withBaseUrl('https://api.example.com'),
+	withDeduplication(),
+	withHttpError(),
 );
 
 const response = await apiFetch('/users');
 ```
 */
-export function withDeduplication(
-	fetchFunction: typeof fetch,
-): typeof fetch;
+export function withDeduplication(): (fetchFunction: typeof fetch) => typeof fetch;

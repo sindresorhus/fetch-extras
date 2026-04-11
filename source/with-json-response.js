@@ -12,31 +12,33 @@ export class SchemaValidationError extends Error {
 	}
 }
 
-export function withJsonResponse(fetchFunction, {schema} = {}) {
+export function withJsonResponse({schema} = {}) {
 	if (schema !== undefined && typeof schema?.['~standard']?.validate !== 'function') {
 		throw new TypeError('The `schema` option must be a Standard Schema object (https://standardschema.dev)');
 	}
 
-	const fetchWithJsonResponse = async (urlOrRequest, options = {}) => {
-		const response = await fetchFunction(urlOrRequest, options);
+	return fetchFunction => {
+		const fetchWithJsonResponse = async (urlOrRequest, options = {}) => {
+			const response = await fetchFunction(urlOrRequest, options);
 
-		// Keep the contract strict: this wrapper means "parse JSON".
-		// Empty 200/204/205/HEAD responses are therefore treated as not JSON and throw,
-		// instead of widening every successful call site with a special-case empty value.
-		const jsonValue = await response.json();
+			// Keep the contract strict: this wrapper means "parse JSON".
+			// Empty 200/204/205/HEAD responses are therefore treated as not JSON and throw,
+			// instead of widening every successful call site with a special-case empty value.
+			const jsonValue = await response.json();
 
-		if (!schema) {
-			return jsonValue;
-		}
+			if (!schema) {
+				return jsonValue;
+			}
 
-		const result = await schema['~standard'].validate(jsonValue);
+			const result = await schema['~standard'].validate(jsonValue);
 
-		if (result.issues) {
-			throw new SchemaValidationError(result.issues, response);
-		}
+			if (result.issues) {
+				throw new SchemaValidationError(result.issues, response);
+			}
 
-		return result.value;
+			return result.value;
+		};
+
+		return copyFetchMetadata(fetchWithJsonResponse, fetchFunction);
 	};
-
-	return copyFetchMetadata(fetchWithJsonResponse, fetchFunction);
 }

@@ -18,7 +18,7 @@ import {withJsonResponse, SchemaValidationError} from 'fetch-extras';
 import {z} from 'zod';
 
 const userSchema = z.object({name: z.string()});
-const fetchUser = withJsonResponse(fetch, {schema: userSchema});
+const fetchUser = withJsonResponse({schema: userSchema})(fetch);
 
 try {
 	const user = await fetchUser('/api/user');

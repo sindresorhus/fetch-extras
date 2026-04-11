@@ -51,7 +51,7 @@ const createAuthorizationEchoFetch = () => {
 
 test('returns cached response for repeated GET requests', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const response1 = await cachedFetch('https://example.com/api');
 	const data1 = await response1.json();
@@ -71,7 +71,7 @@ test.serial('cache expires after TTL', async t => {
 	performance.now = () => currentTime;
 
 	try {
-		const cachedFetch = withCache(mockFetch, {ttl: 5000});
+		const cachedFetch = withCache({ttl: 5000})(mockFetch);
 
 		await cachedFetch('https://example.com/api');
 		t.is(mockFetch.callCount, 1);
@@ -92,7 +92,7 @@ test.serial('cache expires after TTL', async t => {
 
 test('different URLs are cached independently', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	await cachedFetch('https://example.com/a');
 	await cachedFetch('https://example.com/b');
@@ -102,10 +102,26 @@ test('different URLs are cached independently', async t => {
 	t.is(mockFetch.callCount, 2);
 });
 
+test('reused cache wrapper creates an independent cache per wrapped fetch function', async t => {
+	const cache = withCache({ttl: 60_000});
+	const firstFetch = createMockFetch();
+	const secondFetch = createMockFetch();
+	const cachedFetchA = cache(firstFetch);
+	const cachedFetchB = cache(secondFetch);
+
+	const response = await cachedFetchA('https://example.com/api');
+	const independentResponse = await cachedFetchB('https://example.com/api');
+
+	t.deepEqual(await response.json(), {callCount: 1});
+	t.deepEqual(await independentResponse.json(), {callCount: 1});
+	t.is(firstFetch.callCount, 1);
+	t.is(secondFetch.callCount, 1);
+});
+
 test('GET requests with Authorization headers are not cached', async t => {
 	const mockFetch = createAuthorizationEchoFetch();
 
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const firstResponse = await cachedFetch('https://example.com/api', {
 		headers: {
@@ -133,10 +149,10 @@ test('GET requests with inherited Authorization headers are not cached', async t
 
 	const cachedFetch = pipeline(
 		mockFetch,
-		fetchFunction => withHeaders(fetchFunction, {
+		withHeaders({
 			authorization: 'Bearer token',
 		}),
-		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+		withCache({ttl: 60_000}),
 	);
 
 	const firstResponse = await cachedFetch('https://example.com/api');
@@ -158,13 +174,13 @@ test('GET requests with inherited async Authorization headers are not cached', a
 
 	const cachedFetch = pipeline(
 		mockFetch,
-		fetchFunction => withHeaders(fetchFunction, async () => {
+		withHeaders(async () => {
 			tokenNumber++;
 			return {
 				authorization: `Bearer token-${tokenNumber}`,
 			};
 		}),
-		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+		withCache({ttl: 60_000}),
 	);
 
 	const firstResponse = await cachedFetch('https://example.com/api');
@@ -187,8 +203,8 @@ test('GET requests preserve empty resolved async headers when checking cacheabil
 
 	const cachedFetch = pipeline(
 		mockFetch,
-		fetchFunction => withHeaders(fetchFunction, async () => resolvedHeaders.shift() ?? {}),
-		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+		withHeaders(async () => resolvedHeaders.shift() ?? {}),
+		withCache({ttl: 60_000}),
 	);
 
 	const firstResponse = await cachedFetch('https://example.com/api');
@@ -221,7 +237,7 @@ test('GET requests with sync resolveRequestHeadersSymbol stay cacheable when it 
 		return new Headers();
 	};
 
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const firstResponse = await cachedFetch('https://example.com/api');
 	const secondResponse = await cachedFetch('https://example.com/api');
@@ -268,7 +284,7 @@ test('withTimeout applies while cache pre-resolves async request headers', async
 		return new Headers({'x-test': '1'});
 	};
 
-	const cachedFetch = withCache(withTimeout(mockFetch, 20), {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(withTimeout(20)(mockFetch));
 
 	const error = await t.throwsAsync(() => cachedFetch('https://example.com/api'));
 
@@ -290,11 +306,11 @@ test('GET requests with async withHeaders resolve the header function exactly on
 
 	const cachedFetch = pipeline(
 		mockFetch,
-		fetchFunction => withHeaders(fetchFunction, async () => {
+		withHeaders(async () => {
 			resolverCallCount++;
 			return {'x-dynamic': `call-${resolverCallCount}`};
 		}),
-		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+		withCache({ttl: 60_000}),
 	);
 
 	const response = await cachedFetch('https://example.com/api');
@@ -318,11 +334,11 @@ test('POST requests with async withHeaders resolve the header function exactly o
 
 	const cachedFetch = pipeline(
 		mockFetch,
-		fetchFunction => withHeaders(fetchFunction, async () => {
+		withHeaders(async () => {
 			resolverCallCount++;
 			return {'x-dynamic': `call-${resolverCallCount}`};
 		}),
-		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+		withCache({ttl: 60_000}),
 	);
 
 	const response = await cachedFetch('https://example.com/api', {method: 'POST'});
@@ -349,7 +365,7 @@ test('GET requests with sync resolveRequestHeadersSymbol stay non-cacheable when
 		return new Headers({'x-dynamic': `call-${resolverCallCount}`});
 	};
 
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const firstResponse = await cachedFetch('https://example.com/api');
 	const secondResponse = await cachedFetch('https://example.com/api');
@@ -379,10 +395,10 @@ test('GET requests with inherited non-auth headers are not cached', async t => {
 
 	const cachedFetch = pipeline(
 		mockFetch,
-		fetchFunction => withHeaders(fetchFunction, {
+		withHeaders({
 			'x-tenant': 'alpha',
 		}),
-		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+		withCache({ttl: 60_000}),
 	);
 
 	const firstResponse = await cachedFetch('https://example.com/api');
@@ -409,7 +425,7 @@ test('GET requests with Cookie headers are not cached', async t => {
 		});
 	};
 
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const firstResponse = await cachedFetch('https://example.com/api', {
 		headers: {
@@ -443,7 +459,7 @@ test('GET requests with custom credential headers are not cached', async t => {
 		});
 	};
 
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const firstResponse = await cachedFetch('https://example.com/api', {
 		headers: {
@@ -467,7 +483,7 @@ test('GET requests with custom credential headers are not cached', async t => {
 });
 
 test('GET requests with credentials: include are not cached', async t => {
-	const cachedFetch = withCache(createOptionSensitiveFetch('credentials'), {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(createOptionSensitiveFetch('credentials'));
 
 	const firstResponse = await cachedFetch('https://example.com/api', {
 		credentials: 'include',
@@ -485,7 +501,7 @@ test('GET requests with credentials: include are not cached', async t => {
 });
 
 test('GET requests with integrity metadata are not cached', async t => {
-	const cachedFetch = withCache(createOptionSensitiveFetch('integrity'), {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(createOptionSensitiveFetch('integrity'));
 
 	const firstResponse = await cachedFetch('https://example.com/api', {
 		integrity: 'sha256-test',
@@ -503,7 +519,7 @@ test('GET requests with integrity metadata are not cached', async t => {
 });
 
 test('GET requests with mode metadata are not cached', async t => {
-	const cachedFetch = withCache(createOptionSensitiveFetch('mode'), {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(createOptionSensitiveFetch('mode'));
 
 	const firstResponse = await cachedFetch('https://example.com/api', {
 		mode: 'same-origin',
@@ -521,7 +537,7 @@ test('GET requests with mode metadata are not cached', async t => {
 });
 
 test('GET requests with redirect metadata are not cached', async t => {
-	const cachedFetch = withCache(createOptionSensitiveFetch('redirect'), {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(createOptionSensitiveFetch('redirect'));
 
 	const firstResponse = await cachedFetch('https://example.com/api', {
 		redirect: 'manual',
@@ -539,7 +555,7 @@ test('GET requests with redirect metadata are not cached', async t => {
 });
 
 test('GET requests with referrer policy metadata are not cached', async t => {
-	const cachedFetch = withCache(createOptionSensitiveFetch('referrerPolicy'), {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(createOptionSensitiveFetch('referrerPolicy'));
 
 	const firstResponse = await cachedFetch('https://example.com/api', {
 		referrerPolicy: 'no-referrer',
@@ -557,7 +573,7 @@ test('GET requests with referrer policy metadata are not cached', async t => {
 });
 
 test('GET requests with referrer metadata are not cached', async t => {
-	const cachedFetch = withCache(createOptionSensitiveFetch('referrer'), {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(createOptionSensitiveFetch('referrer'));
 
 	const firstResponse = await cachedFetch('https://example.com/api', {
 		referrer: 'https://sensitive.example/source',
@@ -585,7 +601,7 @@ test('Request object with non-default credentials is not cached', async t => {
 		});
 	};
 
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const firstResponse = await cachedFetch(new Request('https://example.com/api', {
 		credentials: 'include',
@@ -606,7 +622,7 @@ test('Request object with non-default credentials is not cached', async t => {
 
 test('cached plain response is not served for request with non-default metadata', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	// First: plain request gets cached
 	await cachedFetch('https://example.com/api');
@@ -628,7 +644,7 @@ test('Request inputs with Authorization headers are not cached', async t => {
 		});
 	};
 
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const firstResponse = await cachedFetch(new Request('https://example.com/api', {
 		headers: {
@@ -663,7 +679,7 @@ test('sensitive GET requests bypass existing public cache entries', async t => {
 		});
 	};
 
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const publicResponse = await cachedFetch('https://example.com/api');
 	t.deepEqual(await publicResponse.json(), {
@@ -702,7 +718,7 @@ test('conditional GET requests bypass existing cache entries', async t => {
 		});
 	};
 
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const firstResponse = await cachedFetch('https://example.com/api');
 	t.deepEqual(await firstResponse.json(), {
@@ -725,10 +741,10 @@ test('header-bearing cache: only-if-cached requests return a cache miss', async 
 	const mockFetch = createMockFetch();
 	const cachedFetch = pipeline(
 		mockFetch,
-		fetchFunction => withHeaders(fetchFunction, {
+		withHeaders({
 			'x-tenant': 'alpha',
 		}),
-		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+		withCache({ttl: 60_000}),
 	);
 
 	const response = await cachedFetch('https://example.com/api', {cache: 'only-if-cached'});
@@ -739,7 +755,7 @@ test('header-bearing cache: only-if-cached requests return a cache miss', async 
 
 test('non-GET requests pass through', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	await cachedFetch('https://example.com/api', {method: 'POST'});
 	await cachedFetch('https://example.com/api', {method: 'POST'});
@@ -749,7 +765,7 @@ test('non-GET requests pass through', async t => {
 
 test('non-GET requests invalidate cache for that URL', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	// Populate cache
 	await cachedFetch('https://example.com/api');
@@ -783,7 +799,7 @@ test('in-flight mutating requests immediately invalidate cached GET responses', 
 		return new Response('mutated');
 	};
 
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const initialResponse = await cachedFetch('https://example.com/api');
 	t.is(await initialResponse.text(), 'get-1');
@@ -821,7 +837,7 @@ test('mutating requests invalidate cached GET responses before async request-hea
 
 	const cachedFetch = pipeline(
 		mockFetch,
-		fetchFunction => withHeaders(fetchFunction, async () => {
+		withHeaders(async () => {
 			headerResolutionCount++;
 
 			if (headerResolutionCount === 2) {
@@ -830,7 +846,7 @@ test('mutating requests invalidate cached GET responses before async request-hea
 
 			return {};
 		}),
-		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+		withCache({ttl: 60_000}),
 	);
 
 	const initialResponse = await cachedFetch('https://example.com/api');
@@ -870,7 +886,7 @@ test('mutating Request inputs invalidate cached GET responses before async reque
 
 	const cachedFetch = pipeline(
 		mockFetch,
-		fetchFunction => withHeaders(fetchFunction, async () => {
+		withHeaders(async () => {
 			headerResolutionCount++;
 
 			if (headerResolutionCount === 2) {
@@ -879,7 +895,7 @@ test('mutating Request inputs invalidate cached GET responses before async reque
 
 			return {};
 		}),
-		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+		withCache({ttl: 60_000}),
 	);
 
 	const initialResponse = await cachedFetch('https://example.com/api');
@@ -900,7 +916,7 @@ test('mutating Request inputs invalidate cached GET responses before async reque
 
 test('aborted mutating requests do not evict cached GET responses', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	await cachedFetch('https://example.com/api');
 	t.is(mockFetch.callCount, 1);
@@ -920,7 +936,7 @@ test('aborted mutating requests do not evict cached GET responses', async t => {
 
 test('aborted mutating Request objects do not evict cached GET responses', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	await cachedFetch('https://example.com/api');
 	t.is(mockFetch.callCount, 1);
@@ -956,9 +972,8 @@ test('queued mutating requests that time out before start do not evict cached GE
 		});
 	};
 
-	const cachedFetch = withCache(
-		withRateLimit(withTimeout(mockFetch, 50), {requestsPerInterval: 1, interval: 200}),
-		{ttl: 60_000},
+	const cachedFetch = withCache({ttl: 60_000})(
+		withRateLimit({requestsPerInterval: 1, interval: 200})(withTimeout(50)(mockFetch)),
 	);
 
 	await cachedFetch('https://example.com/api');
@@ -989,13 +1004,13 @@ test('short-circuited mutating requests do not evict cached GET responses', asyn
 		return new Response('mutated');
 	};
 
-	const cachedFetch = withCache(withHooks(mockFetch, {
+	const cachedFetch = withCache({ttl: 60_000})(withHooks({
 		beforeRequest({options}) {
 			if ((options.method ?? 'GET').toUpperCase() === 'POST') {
 				return new Response('short-circuited');
 			}
 		},
-	}), {ttl: 60_000});
+	})(mockFetch));
 
 	const initialResponse = await cachedFetch('https://example.com/api');
 	t.is(await initialResponse.text(), 'get-1');
@@ -1023,11 +1038,11 @@ test('mutating requests through withHooks still evict cached GET responses when 
 		return new Response('mutated');
 	};
 
-	const cachedFetch = withCache(withHooks(mockFetch, {
+	const cachedFetch = withCache({ttl: 60_000})(withHooks({
 		async beforeRequest() {
 			await Promise.resolve();
 		},
-	}), {ttl: 60_000});
+	})(mockFetch));
 
 	const initialResponse = await cachedFetch('https://example.com/api');
 	t.is(await initialResponse.text(), 'get-1');
@@ -1059,12 +1074,10 @@ test('queued mutating requests in nested delayed-start wrappers do not evict cac
 		});
 	};
 
-	const cachedFetch = withCache(
-		withConcurrency(
-			withRateLimit(withTimeout(mockFetch, 50), {requestsPerInterval: 1, interval: 200}),
-			{maxConcurrentRequests: 1},
+	const cachedFetch = withCache({ttl: 60_000})(
+		withConcurrency({maxConcurrentRequests: 1})(
+			withRateLimit({requestsPerInterval: 1, interval: 200})(withTimeout(50)(mockFetch)),
 		),
-		{ttl: 60_000},
 	);
 
 	await cachedFetch('https://example.com/api');
@@ -1100,14 +1113,12 @@ test('queued mutating requests in the documented delayed-start pipeline do not e
 		});
 	};
 
-	const cachedFetch = withCache(
-		withDeduplication(
-			withConcurrency(
-				withRateLimit(withTimeout(mockFetch, 50), {requestsPerInterval: 1, interval: 200}),
-				{maxConcurrentRequests: 1},
+	const cachedFetch = withCache({ttl: 60_000})(
+		withDeduplication()(
+			withConcurrency({maxConcurrentRequests: 1})(
+				withRateLimit({requestsPerInterval: 1, interval: 200})(withTimeout(50)(mockFetch)),
 			),
 		),
-		{ttl: 60_000},
 	);
 
 	await cachedFetch('https://example.com/api');
@@ -1127,7 +1138,7 @@ test('queued mutating requests in the documented delayed-start pipeline do not e
 
 test('does not cache non-ok responses', async t => {
 	const mockFetch = createMockFetch(404);
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const response1 = await cachedFetch('https://example.com/api');
 	t.is(response1.status, 404);
@@ -1140,7 +1151,7 @@ test('does not cache non-ok responses', async t => {
 
 test('does not cache 500 responses', async t => {
 	const mockFetch = createMockFetch(500);
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	await cachedFetch('https://example.com/api');
 	await cachedFetch('https://example.com/api');
@@ -1150,7 +1161,7 @@ test('does not cache 500 responses', async t => {
 
 test('each cache hit returns independent clone', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const response1 = await cachedFetch('https://example.com/api');
 	const response2 = await cachedFetch('https://example.com/api');
@@ -1165,7 +1176,7 @@ test('each cache hit returns independent clone', async t => {
 
 test('works with Request objects', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const request = new Request('https://example.com/api');
 	await cachedFetch(request);
@@ -1176,7 +1187,7 @@ test('works with Request objects', async t => {
 
 test('works with URL objects', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const url = new URL('https://example.com/api');
 	await cachedFetch(url);
@@ -1194,7 +1205,7 @@ test('ranged GET requests are not cached', async t => {
 		return new Response(isRangedRequest ? 'partial' : 'full', {status: isRangedRequest ? 206 : 200});
 	};
 
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const rangedResponse = await cachedFetch('https://example.com/api', {headers: {Range: 'bytes=0-3'}});
 	t.is(await rangedResponse.text(), 'partial');
@@ -1214,7 +1225,7 @@ test('ranged GET requests bypass an existing cached full response', async t => {
 		return new Response(isRangedRequest ? 'partial' : 'full', {status: isRangedRequest ? 206 : 200});
 	};
 
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const fullResponse = await cachedFetch('https://example.com/api');
 	t.is(await fullResponse.text(), 'full');
@@ -1239,8 +1250,8 @@ test('ranged GET requests added by an inner wrapper are not cached', async t => 
 
 	const cachedFetch = pipeline(
 		mockFetch,
-		fetchFunction => withHeaders(fetchFunction, {Range: 'bytes=0-3'}),
-		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+		withHeaders({Range: 'bytes=0-3'}),
+		withCache({ttl: 60_000}),
 	);
 
 	const firstResponse = await cachedFetch('https://example.com/api');
@@ -1261,8 +1272,8 @@ test('ranged GET requests added by an inner wrapper are not cached when the serv
 
 	const cachedFetch = pipeline(
 		mockFetch,
-		fetchFunction => withHeaders(fetchFunction, {Range: 'bytes=0-3'}),
-		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+		withHeaders({Range: 'bytes=0-3'}),
+		withCache({ttl: 60_000}),
 	);
 
 	const firstResponse = await cachedFetch('https://example.com/api');
@@ -1283,9 +1294,9 @@ test('ranged GET requests added by nested inner wrappers are not cached when the
 
 	const cachedFetch = pipeline(
 		mockFetch,
-		fetchFunction => withHeaders(fetchFunction, {Range: 'bytes=0-3'}),
-		fetchFunction => withHeaders(fetchFunction, {'x-test': '1'}),
-		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+		withHeaders({Range: 'bytes=0-3'}),
+		withHeaders({'x-test': '1'}),
+		withCache({ttl: 60_000}),
 	);
 
 	const firstResponse = await cachedFetch('https://example.com/api');
@@ -1306,8 +1317,8 @@ test('ranged GET requests added by an inner wrapper bypass an existing cached fu
 
 	const cachedFetch = pipeline(
 		mockFetch,
-		fetchFunction => withHeaders(fetchFunction, {Range: 'bytes=0-3'}),
-		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+		withHeaders({Range: 'bytes=0-3'}),
+		withCache({ttl: 60_000}),
 	);
 
 	const fullResponse = await cachedFetch('https://example.com/api', {
@@ -1330,8 +1341,8 @@ test('ranged GET requests added by an inner wrapper can be blocked per call and 
 
 	const cachedFetch = pipeline(
 		mockFetch,
-		fetchFunction => withHeaders(fetchFunction, {Range: 'bytes=0-3'}),
-		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+		withHeaders({Range: 'bytes=0-3'}),
+		withCache({ttl: 60_000}),
 	);
 
 	const firstResponse = await cachedFetch('https://example.com/api', {
@@ -1356,8 +1367,8 @@ test('blocking an inner Range default for one call does not stop later effective
 
 	const cachedFetch = pipeline(
 		mockFetch,
-		fetchFunction => withHeaders(fetchFunction, {Range: 'bytes=0-3'}),
-		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+		withHeaders({Range: 'bytes=0-3'}),
+		withCache({ttl: 60_000}),
 	);
 
 	const fullResponse = await cachedFetch('https://example.com/api', {
@@ -1387,8 +1398,8 @@ test('explicit per-call Range headers still bypass cache when an inner Range def
 
 	const cachedFetch = pipeline(
 		mockFetch,
-		fetchFunction => withHeaders(fetchFunction, {Range: 'bytes=0-3'}),
-		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+		withHeaders({Range: 'bytes=0-3'}),
+		withCache({ttl: 60_000}),
 	);
 
 	const firstResponse = await cachedFetch('https://example.com/api', {
@@ -1418,8 +1429,8 @@ test('explicit Request Range headers still bypass cache when an inner Range defa
 
 	const cachedFetch = pipeline(
 		mockFetch,
-		fetchFunction => withHeaders(fetchFunction, {Range: 'bytes=0-3'}),
-		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+		withHeaders({Range: 'bytes=0-3'}),
+		withCache({ttl: 60_000}),
 	);
 
 	const request = new Request('https://example.com/api', {
@@ -1451,8 +1462,8 @@ test('Request metadata can block an inner Range default and allow caching', asyn
 
 	const cachedFetch = pipeline(
 		mockFetch,
-		fetchFunction => withHeaders(fetchFunction, {Range: 'bytes=0-3'}),
-		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+		withHeaders({Range: 'bytes=0-3'}),
+		withCache({ttl: 60_000}),
 	);
 
 	const request = new Request('https://example.com/api');
@@ -1479,8 +1490,8 @@ test('headers metadata can block an inner Range default and allow caching', asyn
 
 	const cachedFetch = pipeline(
 		mockFetch,
-		fetchFunction => withHeaders(fetchFunction, {Range: 'bytes=0-3'}),
-		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+		withHeaders({Range: 'bytes=0-3'}),
+		withCache({ttl: 60_000}),
 	);
 
 	const headers = new Headers();
@@ -1498,7 +1509,7 @@ test('headers metadata can block an inner Range default and allow caching', asyn
 
 test('URL fragments do not create separate cache entries', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	await cachedFetch('https://example.com/api#one');
 	await cachedFetch('https://example.com/api#two');
@@ -1508,7 +1519,7 @@ test('URL fragments do not create separate cache entries', async t => {
 
 test('Request URL fragments do not create separate cache entries', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	await cachedFetch(new Request('https://example.com/api#one'));
 	await cachedFetch(new Request('https://example.com/api#two'));
@@ -1520,8 +1531,8 @@ test('withBaseUrl composition shares a cache entry across equivalent relative UR
 	const mockFetch = createMockFetch();
 	const cachedFetch = pipeline(
 		mockFetch,
-		fetchFunction => withBaseUrl(fetchFunction, 'https://api.example.com/v1'),
-		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+		withBaseUrl('https://api.example.com/v1'),
+		withCache({ttl: 60_000}),
 	);
 
 	await cachedFetch('/users');
@@ -1534,8 +1545,8 @@ test('withBaseUrl composition invalidates cached GETs across equivalent relative
 	const mockFetch = createMockFetch();
 	const cachedFetch = pipeline(
 		mockFetch,
-		fetchFunction => withBaseUrl(fetchFunction, 'https://api.example.com/v1'),
-		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+		withBaseUrl('https://api.example.com/v1'),
+		withCache({ttl: 60_000}),
 	);
 
 	await cachedFetch('/users');
@@ -1552,8 +1563,8 @@ test('withBaseUrl composition shares a cache entry with the equivalent absolute 
 	const mockFetch = createMockFetch();
 	const cachedFetch = pipeline(
 		mockFetch,
-		fetchFunction => withBaseUrl(fetchFunction, 'https://api.example.com/v1'),
-		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+		withBaseUrl('https://api.example.com/v1'),
+		withCache({ttl: 60_000}),
 	);
 
 	await cachedFetch('/users');
@@ -1566,8 +1577,8 @@ test('withSearchParameters composition shares a cache entry across equivalent ab
 	const mockFetch = createMockFetch();
 	const cachedFetch = pipeline(
 		mockFetch,
-		fetchFunction => withSearchParameters(fetchFunction, {apiKey: 'abc'}),
-		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+		withSearchParameters({apiKey: 'abc'}),
+		withCache({ttl: 60_000}),
 	);
 
 	await cachedFetch('https://example.com');
@@ -1580,8 +1591,8 @@ test('withBaseUrl composition invalidates cached GETs across equivalent absolute
 	const mockFetch = createMockFetch();
 	const cachedFetch = pipeline(
 		mockFetch,
-		fetchFunction => withBaseUrl(fetchFunction, 'https://api.example.com/v1'),
-		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+		withBaseUrl('https://api.example.com/v1'),
+		withCache({ttl: 60_000}),
 	);
 
 	await cachedFetch('/users');
@@ -1603,9 +1614,9 @@ test('nested withBaseUrl composition keys cache entries from the outer resolved 
 
 	const cachedFetch = pipeline(
 		mockFetch,
-		fetchFunction => withBaseUrl(fetchFunction, 'https://inner.example.com'),
-		fetchFunction => withBaseUrl(fetchFunction, 'https://outer.example.com'),
-		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+		withBaseUrl('https://inner.example.com'),
+		withBaseUrl('https://outer.example.com'),
+		withCache({ttl: 60_000}),
 	);
 
 	const firstResponse = await cachedFetch('/users');
@@ -1624,9 +1635,9 @@ test('nested withBaseUrl composition shares a cache entry with the equivalent ou
 	const mockFetch = createMockFetch();
 	const cachedFetch = pipeline(
 		mockFetch,
-		fetchFunction => withBaseUrl(fetchFunction, 'https://inner.example.com'),
-		fetchFunction => withBaseUrl(fetchFunction, 'https://outer.example.com'),
-		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+		withBaseUrl('https://inner.example.com'),
+		withBaseUrl('https://outer.example.com'),
+		withCache({ttl: 60_000}),
 	);
 
 	await cachedFetch('/users');
@@ -1639,9 +1650,9 @@ test('nested withBaseUrl composition invalidates cached GETs across equivalent o
 	const mockFetch = createMockFetch();
 	const cachedFetch = pipeline(
 		mockFetch,
-		fetchFunction => withBaseUrl(fetchFunction, 'https://inner.example.com'),
-		fetchFunction => withBaseUrl(fetchFunction, 'https://outer.example.com'),
-		fetchFunction => withCache(fetchFunction, {ttl: 60_000}),
+		withBaseUrl('https://inner.example.com'),
+		withBaseUrl('https://outer.example.com'),
+		withCache({ttl: 60_000}),
 	);
 
 	await cachedFetch('/users');
@@ -1656,7 +1667,7 @@ test('nested withBaseUrl composition invalidates cached GETs across equivalent o
 
 test('detects method from Request object', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const postRequest = new Request('https://example.com/api', {method: 'POST'});
 	await cachedFetch(postRequest);
@@ -1667,7 +1678,7 @@ test('detects method from Request object', async t => {
 
 test('options.method takes precedence over Request.method', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const getRequest = new Request('https://example.com/api');
 	await cachedFetch(getRequest, {method: 'POST'});
@@ -1679,25 +1690,25 @@ test('options.method takes precedence over Request.method', async t => {
 test('throws for invalid ttl', t => {
 	const mockFetch = createMockFetch();
 
-	t.throws(() => withCache(mockFetch, {ttl: 0}), {instanceOf: TypeError});
-	t.throws(() => withCache(mockFetch, {ttl: -1}), {instanceOf: TypeError});
-	t.throws(() => withCache(mockFetch, {ttl: Number.POSITIVE_INFINITY}), {instanceOf: TypeError});
-	t.throws(() => withCache(mockFetch, {ttl: Number.NaN}), {instanceOf: TypeError});
-	t.throws(() => withCache(mockFetch, {ttl: '1000'}), {instanceOf: TypeError});
+	t.throws(() => withCache({ttl: 0})(mockFetch), {instanceOf: TypeError});
+	t.throws(() => withCache({ttl: -1})(mockFetch), {instanceOf: TypeError});
+	t.throws(() => withCache({ttl: Number.POSITIVE_INFINITY})(mockFetch), {instanceOf: TypeError});
+	t.throws(() => withCache({ttl: Number.NaN})(mockFetch), {instanceOf: TypeError});
+	t.throws(() => withCache({ttl: '1000'})(mockFetch), {instanceOf: TypeError});
 });
 
 test('preserves metadata via copyFetchMetadata', t => {
 	const mockFetch = createMockFetch();
 	mockFetch[timeoutDurationSymbol] = 5000;
 
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	t.is(cachedFetch[timeoutDurationSymbol], 5000);
 });
 
 test('method comparison is case-insensitive', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	await cachedFetch('https://example.com/api', {method: 'get'});
 	await cachedFetch('https://example.com/api');
@@ -1707,7 +1718,7 @@ test('method comparison is case-insensitive', async t => {
 
 test('PUT invalidates cache', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	await cachedFetch('https://example.com/api');
 	await cachedFetch('https://example.com/api', {method: 'PUT'});
@@ -1718,7 +1729,7 @@ test('PUT invalidates cache', async t => {
 
 test('DELETE invalidates cache', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	await cachedFetch('https://example.com/api');
 	await cachedFetch('https://example.com/api', {method: 'DELETE'});
@@ -1738,7 +1749,7 @@ test('fetch rejection does not leave stale cache entry', async t => {
 		return new Response('ok');
 	};
 
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	await t.throwsAsync(() => cachedFetch('https://example.com/api'), {message: 'network error'});
 
@@ -1750,7 +1761,7 @@ test('fetch rejection does not leave stale cache entry', async t => {
 
 test('PATCH invalidates cache', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	await cachedFetch('https://example.com/api');
 	await cachedFetch('https://example.com/api', {method: 'PATCH'});
@@ -1761,7 +1772,7 @@ test('PATCH invalidates cache', async t => {
 
 test('HEAD requests are not cached', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	await cachedFetch('https://example.com/api', {method: 'HEAD'});
 	await cachedFetch('https://example.com/api', {method: 'HEAD'});
@@ -1771,7 +1782,7 @@ test('HEAD requests are not cached', async t => {
 
 test('HEAD does not invalidate cached GET', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	// Populate cache with GET
 	await cachedFetch('https://example.com/api');
@@ -1788,7 +1799,7 @@ test('HEAD does not invalidate cached GET', async t => {
 
 test('OPTIONS does not invalidate cached GET', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	await cachedFetch('https://example.com/api');
 	t.is(mockFetch.callCount, 1);
@@ -1803,7 +1814,7 @@ test('OPTIONS does not invalidate cached GET', async t => {
 
 test('non-GET requests invalidate cached GET across URL fragments', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	await cachedFetch('https://example.com/api#cached');
 	t.is(mockFetch.callCount, 1);
@@ -1817,7 +1828,7 @@ test('non-GET requests invalidate cached GET across URL fragments', async t => {
 
 test('Request non-GET invalidates cached GET across URL fragments', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	await cachedFetch(new Request('https://example.com/api#cached'));
 	t.is(mockFetch.callCount, 1);
@@ -1837,7 +1848,7 @@ test('non-ok response is not cached, subsequent ok response is cached', async t 
 		return new Response('data', {status});
 	};
 
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const response1 = await cachedFetch('https://example.com/api');
 	t.is(response1.status, 500);
@@ -1856,7 +1867,7 @@ test('non-ok response is not cached, subsequent ok response is cached', async t 
 
 test('concurrent identical GET requests both hit the network', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const [response1, response2] = await Promise.all([
 		cachedFetch('https://example.com/api'),
@@ -1891,7 +1902,7 @@ test('older GETs do not repopulate the cache after a successful write', async t 
 		return new Response('mutated');
 	};
 
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const staleGetPromise = cachedFetch('https://example.com/api');
 	await Promise.resolve();
@@ -1929,7 +1940,7 @@ test('older GETs do not repopulate the cache after a successful write from Reque
 		return new Response('mutated');
 	};
 
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const staleGetPromise = cachedFetch('https://example.com/api');
 	await Promise.resolve();
@@ -1973,7 +1984,7 @@ test.serial('older GETs do not repopulate the cache after write invalidation out
 	};
 
 	try {
-		const cachedFetch = withCache(mockFetch, {ttl: 5000});
+		const cachedFetch = withCache({ttl: 5000})(mockFetch);
 
 		const staleGetPromise = cachedFetch('https://example.com/api');
 		await Promise.resolve();
@@ -2016,7 +2027,7 @@ test('older GETs still populate the cache after an aborted write', async t => {
 		return new Response('mutated');
 	};
 
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const staleGetPromise = cachedFetch('https://example.com/api');
 	await Promise.resolve();
@@ -2058,7 +2069,7 @@ test('older GETs still populate the cache across overlapping HEAD requests', asy
 		return new Response(undefined, {status: 200});
 	};
 
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const staleGetPromise = cachedFetch('https://example.com/api');
 	await Promise.resolve();
@@ -2097,7 +2108,7 @@ test('older GETs still populate the cache when a successful write targets a diff
 		return new Response('mutated-b');
 	};
 
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const staleGetPromise = cachedFetch('https://example.com/a');
 	await Promise.resolve();
@@ -2115,7 +2126,7 @@ test('older GETs still populate the cache when a successful write targets a diff
 
 test('invalidation is scoped to the specific URL', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	await cachedFetch('https://example.com/a');
 	await cachedFetch('https://example.com/b');
@@ -2135,8 +2146,8 @@ test('invalidation is scoped to the specific URL', async t => {
 
 test('separate withCache instances have independent caches', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch1 = withCache(mockFetch, {ttl: 60_000});
-	const cachedFetch2 = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch1 = withCache({ttl: 60_000})(mockFetch);
+	const cachedFetch2 = withCache({ttl: 60_000})(mockFetch);
 
 	await cachedFetch1('https://example.com/api');
 	t.is(mockFetch.callCount, 1);
@@ -2158,7 +2169,7 @@ test('cached response preserves status and headers', async t => {
 		headers: {'x-custom': 'value', 'content-type': 'text/plain'},
 	});
 
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	await cachedFetch('https://example.com/api');
 	const cached = await cachedFetch('https://example.com/api');
@@ -2170,7 +2181,7 @@ test('cached response preserves status and headers', async t => {
 
 test('cached GET honors aborted option signal', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	await cachedFetch('https://example.com/api');
 	t.is(mockFetch.callCount, 1);
@@ -2186,7 +2197,7 @@ test('cached GET honors aborted option signal', async t => {
 
 test('cached GET honors aborted Request signal', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	await cachedFetch('https://example.com/api');
 	t.is(mockFetch.callCount, 1);
@@ -2202,7 +2213,7 @@ test('cached GET honors aborted Request signal', async t => {
 
 test('cache: no-store bypasses and does not replace a cached GET', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const cachedResponse = await cachedFetch('https://example.com/api');
 	t.deepEqual(await cachedResponse.json(), {callCount: 1});
@@ -2219,7 +2230,7 @@ test('cache: no-store bypasses and does not replace a cached GET', async t => {
 
 test('Request cache: no-store bypasses and does not replace a cached GET', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const cachedResponse = await cachedFetch('https://example.com/api');
 	t.deepEqual(await cachedResponse.json(), {callCount: 1});
@@ -2236,7 +2247,7 @@ test('Request cache: no-store bypasses and does not replace a cached GET', async
 
 test('cache: reload bypasses and refreshes a cached GET', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	await cachedFetch('https://example.com/api');
 	t.is(mockFetch.callCount, 1);
@@ -2252,7 +2263,7 @@ test('cache: reload bypasses and refreshes a cached GET', async t => {
 
 test('cache: no-cache bypasses and refreshes a cached GET', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	await cachedFetch('https://example.com/api');
 	t.is(mockFetch.callCount, 1);
@@ -2273,7 +2284,7 @@ test.serial('cache: force-cache returns stale cached entry after TTL expiry', as
 	performance.now = () => currentTime;
 
 	try {
-		const cachedFetch = withCache(mockFetch, {ttl: 5000});
+		const cachedFetch = withCache({ttl: 5000})(mockFetch);
 
 		await cachedFetch('https://example.com/api');
 		t.is(mockFetch.callCount, 1);
@@ -2289,7 +2300,7 @@ test.serial('cache: force-cache returns stale cached entry after TTL expiry', as
 
 test('cache: only-if-cached returns 504 on cache miss', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const response = await cachedFetch('https://example.com/api', {cache: 'only-if-cached'});
 
@@ -2304,7 +2315,7 @@ test.serial('cache: only-if-cached returns stale cached entry after TTL expiry',
 	performance.now = () => currentTime;
 
 	try {
-		const cachedFetch = withCache(mockFetch, {ttl: 5000});
+		const cachedFetch = withCache({ttl: 5000})(mockFetch);
 
 		await cachedFetch('https://example.com/api');
 		t.is(mockFetch.callCount, 1);
@@ -2326,7 +2337,7 @@ test('cache: reload does not replace a cached GET when refresh returns non-ok', 
 		return Response.json({callCount}, {status});
 	};
 
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const cachedResponse = await cachedFetch('https://example.com/api');
 	t.deepEqual(await cachedResponse.json(), {callCount: 1});
@@ -2349,7 +2360,7 @@ test('Request cache: reload does not replace a cached GET when refresh returns n
 		return Response.json({callCount}, {status});
 	};
 
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const cachedResponse = await cachedFetch('https://example.com/api');
 	t.deepEqual(await cachedResponse.json(), {callCount: 1});
@@ -2366,7 +2377,7 @@ test('Request cache: reload does not replace a cached GET when refresh returns n
 
 test('options.cache takes precedence over Request.cache for no-store', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	await cachedFetch('https://example.com/api');
 	t.is(mockFetch.callCount, 1);
@@ -2382,7 +2393,7 @@ test('options.cache takes precedence over Request.cache for no-store', async t =
 
 test('options.cache takes precedence over Request.cache for reload', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	await cachedFetch('https://example.com/api');
 	t.is(mockFetch.callCount, 1);
@@ -2398,7 +2409,7 @@ test('options.cache takes precedence over Request.cache for reload', async t => 
 
 test('options.cache default takes precedence over Request.cache no-store', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const cachedResponse = await cachedFetch('https://example.com/api');
 	t.deepEqual(await cachedResponse.json(), {callCount: 1});
@@ -2411,7 +2422,7 @@ test('options.cache default takes precedence over Request.cache no-store', async
 
 test('options.cache default takes precedence over Request.cache reload', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const cachedResponse = await cachedFetch('https://example.com/api');
 	t.deepEqual(await cachedResponse.json(), {callCount: 1});
@@ -2429,7 +2440,7 @@ test('forwards arguments to the underlying fetch', async t => {
 		return new Response('ok');
 	};
 
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	const options = {headers: {Authorization: 'Bearer token'}};
 	await cachedFetch('https://example.com/api', options);
@@ -2446,7 +2457,7 @@ test.serial('re-caches after TTL expiry', async t => {
 	performance.now = () => currentTime;
 
 	try {
-		const cachedFetch = withCache(mockFetch, {ttl: 5000});
+		const cachedFetch = withCache({ttl: 5000})(mockFetch);
 
 		await cachedFetch('https://example.com/api');
 		t.is(mockFetch.callCount, 1);
@@ -2471,7 +2482,7 @@ test.serial('expired cache entries are evicted during later requests', async t =
 	performance.now = () => currentTime;
 
 	try {
-		const cachedFetch = withCache(mockFetch, {ttl: 5000});
+		const cachedFetch = withCache({ttl: 5000})(mockFetch);
 
 		await cachedFetch('https://example.com/a');
 		t.is(mockFetch.callCount, 1);
@@ -2495,7 +2506,7 @@ test.serial('expired invalidation markers are evicted during later requests', as
 	performance.now = () => currentTime;
 
 	try {
-		const cachedFetch = withCache(mockFetch, {ttl: 5000});
+		const cachedFetch = withCache({ttl: 5000})(mockFetch);
 
 		await cachedFetch('https://example.com/a', {method: 'POST'});
 		t.is(mockFetch.callCount, 1);
@@ -2518,7 +2529,7 @@ test.serial('expired invalidation markers are evicted during later requests', as
 
 test('cache is populated after concurrent requests resolve', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	await Promise.all([
 		cachedFetch('https://example.com/api'),
@@ -2566,7 +2577,7 @@ test('mutation during in-flight GET prevents stale caching', async t => {
 		});
 	};
 
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	// Start a slow GET
 	const slowGet = cachedFetch('https://example.com/api');
@@ -2587,7 +2598,7 @@ test('mutation during in-flight GET prevents stale caching', async t => {
 
 test('TRACE method passes through without invalidating cache', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	// Populate cache
 	const response1 = await cachedFetch('https://example.com/api');
@@ -2610,7 +2621,7 @@ test('server 206 without client Range header is not cached', async t => {
 		return new Response(`response-${callCount}`, {status: callCount === 1 ? 206 : 200});
 	};
 
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	// Server returns 206 even though we didn't send a Range header
 	const response1 = await cachedFetch('https://example.com/api');
@@ -2626,7 +2637,7 @@ test('server 206 without client Range header is not cached', async t => {
 
 test('URLs with different query strings are cached separately', async t => {
 	const mockFetch = createMockFetch();
-	const cachedFetch = withCache(mockFetch, {ttl: 60_000});
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
 
 	await cachedFetch('https://example.com/api?page=1');
 	await cachedFetch('https://example.com/api?page=2');

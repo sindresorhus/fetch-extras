@@ -26,7 +26,7 @@ const createCapturingFetch = () => {
 
 test('stringifies a plain object body and sets Content-Type', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 
 	await fetchWithJson('/api', {method: 'POST', body: {name: 'Alice'}});
 
@@ -37,7 +37,7 @@ test('stringifies a plain object body and sets Content-Type', async t => {
 
 test('stringifies an array body and sets Content-Type', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 
 	await fetchWithJson('/api', {method: 'POST', body: [1, 2, 3]});
 
@@ -48,7 +48,7 @@ test('stringifies an array body and sets Content-Type', async t => {
 
 test('stringifies a nested object body', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 
 	await fetchWithJson('/api', {method: 'POST', body: {user: {name: 'Alice', tags: ['admin']}}});
 
@@ -58,7 +58,7 @@ test('stringifies a nested object body', async t => {
 
 test('stringifies Object.create(null) body', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 
 	const body = Object.create(null);
 	body.key = 'value';
@@ -71,7 +71,7 @@ test('stringifies Object.create(null) body', async t => {
 
 test('passes through string body unchanged', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 
 	await fetchWithJson('/api', {method: 'POST', body: 'hello'});
 
@@ -82,7 +82,7 @@ test('passes through string body unchanged', async t => {
 
 test('passes through when no body is provided', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 
 	await fetchWithJson('/api');
 
@@ -92,7 +92,7 @@ test('passes through when no body is provided', async t => {
 
 test('passes through null body unchanged', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 
 	await fetchWithJson('/api', {method: 'POST', body: null});
 
@@ -102,7 +102,7 @@ test('passes through null body unchanged', async t => {
 
 test('passes through FormData body unchanged', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 
 	const formData = new FormData();
 	formData.append('name', 'Alice');
@@ -114,7 +114,7 @@ test('passes through FormData body unchanged', async t => {
 
 test('passes through URLSearchParams body unchanged', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 
 	const searchParameters = new URLSearchParams({name: 'Alice'});
 	await fetchWithJson('/api', {method: 'POST', body: searchParameters});
@@ -125,7 +125,7 @@ test('passes through URLSearchParams body unchanged', async t => {
 
 test('passes through class instance body unchanged', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 
 	class Payload {
 		name = 'Alice';
@@ -140,7 +140,7 @@ test('passes through class instance body unchanged', async t => {
 
 test('does not override explicit Content-Type header in options', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 
 	await fetchWithJson('/api', {
 		method: 'POST',
@@ -155,7 +155,7 @@ test('does not override explicit Content-Type header in options', async t => {
 
 test('does not override explicit Content-Type via Headers object', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 
 	const headers = new Headers({'Content-Type': 'application/vnd.api+json'});
 	await fetchWithJson('/api', {method: 'POST', body: {name: 'Alice'}, headers});
@@ -166,7 +166,7 @@ test('does not override explicit Content-Type via Headers object', async t => {
 
 test('drops stale explicit request-body headers when stringifying JSON', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 
 	await fetchWithJson('/api', {
 		method: 'POST',
@@ -191,7 +191,7 @@ test('drops stale explicit request-body headers when stringifying JSON', async t
 
 test('preserves other options when stringifying body', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 
 	await fetchWithJson('/api', {method: 'PUT', body: {a: 1}, cache: 'no-store'});
 
@@ -203,7 +203,7 @@ test('preserves other options when stringifying body', async t => {
 
 test('works with Request object as first argument', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 
 	const request = new Request('https://example.com/api', {method: 'POST'});
 	await fetchWithJson(request, {body: {name: 'Alice'}});
@@ -216,7 +216,7 @@ test('works with Request object as first argument', async t => {
 
 test('preserves Request headers when overriding a Request body', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 
 	const request = new Request('https://example.com/api', {
 		method: 'POST',
@@ -242,7 +242,7 @@ test('preserves Request headers when overriding a Request body', async t => {
 
 test('replaced Request bodies do not preserve their original Content-Type', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 
 	const request = new Request('https://example.com/api', {
 		method: 'POST',
@@ -263,7 +263,7 @@ test('replaced Request bodies do not preserve their original Content-Type', asyn
 
 test('drops Blob-derived Request Content-Type when overriding a Request body', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 	const request = new Request('https://example.com/api', {
 		method: 'POST',
 		body: new Blob(['image-bytes'], {type: 'image/png'}),
@@ -282,7 +282,7 @@ test('drops Blob-derived Request Content-Type when overriding a Request body', a
 
 test('drops inherited Request body headers when overriding a Request body', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 
 	const request = new Request('https://example.com/api', {
 		method: 'POST',
@@ -309,8 +309,8 @@ test('preserves blocked default-header markers when overriding a Request body', 
 	const mockFetch = createCapturingFetch();
 	const apiFetch = pipeline(
 		mockFetch,
-		fetchFunction => withHeaders(fetchFunction, {Authorization: 'Bearer token'}),
-		withJsonBody,
+		withHeaders({Authorization: 'Bearer token'}),
+		withJsonBody(),
 	);
 	const request = new Request('https://example.com/api', {
 		method: 'POST',
@@ -330,8 +330,8 @@ test('composes with withHeaders in pipeline', async t => {
 
 	const apiFetch = pipeline(
 		mockFetch,
-		f => withHeaders(f, {Authorization: 'Bearer token'}),
-		withJsonBody,
+		withHeaders({Authorization: 'Bearer token'}),
+		withJsonBody(),
 	);
 
 	await apiFetch('/api', {method: 'POST', body: {name: 'Alice'}});
@@ -347,8 +347,8 @@ test('respects Content-Type set by withHeaders in documented pipeline order', as
 
 	const apiFetch = pipeline(
 		mockFetch,
-		f => withHeaders(f, {'Content-Type': 'application/vnd.api+json'}),
-		withJsonBody,
+		withHeaders({'Content-Type': 'application/vnd.api+json'}),
+		withJsonBody(),
 	);
 
 	await apiFetch('/api', {method: 'POST', body: {name: 'Alice'}});
@@ -363,8 +363,8 @@ test('replaced Request bodies use withHeaders Content-Type defaults in documente
 
 	const apiFetch = pipeline(
 		mockFetch,
-		f => withHeaders(f, {'Content-Type': 'application/vnd.api+json'}),
-		withJsonBody,
+		withHeaders({'Content-Type': 'application/vnd.api+json'}),
+		withJsonBody(),
 	);
 	const request = new Request('https://example.com/api', {
 		method: 'POST',
@@ -384,7 +384,7 @@ test('drops stale body headers from withHeaders defaults when stringifying JSON'
 
 	const apiFetch = pipeline(
 		mockFetch,
-		f => withHeaders(f, {
+		withHeaders({
 			'Content-Type': 'application/vnd.api+json',
 			'Content-Language': 'fr',
 			'Content-Location': '/payload',
@@ -392,7 +392,7 @@ test('drops stale body headers from withHeaders defaults when stringifying JSON'
 			'Content-Length': '999',
 			'X-Default': 'yes',
 		}),
-		withJsonBody,
+		withJsonBody(),
 	);
 
 	await apiFetch('/api', {method: 'POST', body: {name: 'Alice'}});
@@ -415,9 +415,9 @@ test('composes with withBaseUrl and withHttpError in pipeline', async t => {
 
 	const apiFetch = pipeline(
 		capturingFetch,
-		f => withBaseUrl(f, 'https://api.example.com'),
-		withJsonBody,
-		withHttpError,
+		withBaseUrl('https://api.example.com'),
+		withJsonBody(),
+		withHttpError(),
 	);
 
 	await apiFetch('/users', {method: 'POST', body: {name: 'Alice'}});
@@ -430,8 +430,8 @@ test('respects Content-Type set by withHeaders when withHeaders is outer', async
 
 	const apiFetch = pipeline(
 		mockFetch,
-		withJsonBody,
-		f => withHeaders(f, {'Content-Type': 'application/vnd.api+json'}),
+		withJsonBody(),
+		withHeaders({'Content-Type': 'application/vnd.api+json'}),
 	);
 
 	await apiFetch('/api', {method: 'POST', body: {name: 'Alice'}});
@@ -446,8 +446,8 @@ test('respects Content-Type set by async withHeaders in documented pipeline orde
 
 	const apiFetch = pipeline(
 		mockFetch,
-		f => withHeaders(f, async () => ({'Content-Type': 'application/vnd.api+json'})),
-		withJsonBody,
+		withHeaders(async () => ({'Content-Type': 'application/vnd.api+json'})),
+		withJsonBody(),
 	);
 
 	await apiFetch('/api', {method: 'POST', body: {name: 'Alice'}});
@@ -459,7 +459,7 @@ test('respects Content-Type set by async withHeaders in documented pipeline orde
 
 test('handles body with toJSON method', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 
 	const body = {
 		value: 42,
@@ -476,7 +476,7 @@ test('handles body with toJSON method', async t => {
 
 test('handles empty object body', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 
 	await fetchWithJson('/api', {method: 'POST', body: {}});
 
@@ -487,7 +487,7 @@ test('handles empty object body', async t => {
 
 test('handles empty array body', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 
 	await fetchWithJson('/api', {method: 'POST', body: []});
 
@@ -498,7 +498,7 @@ test('handles empty array body', async t => {
 
 test('respects Content-Type set via array-of-tuples headers', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 
 	await fetchWithJson('/api', {
 		method: 'POST',
@@ -513,7 +513,7 @@ test('respects Content-Type set via array-of-tuples headers', async t => {
 
 test('multiple calls do not share state', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 
 	await fetchWithJson('/api', {method: 'POST', body: {first: true}});
 	await fetchWithJson('/api', {method: 'POST', body: {second: true}});
@@ -527,7 +527,7 @@ test('multiple calls do not share state', async t => {
 
 test('does not mutate the original options object', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 
 	const options = {method: 'POST', body: {name: 'Alice'}};
 	await fetchWithJson('/api', options);
@@ -539,7 +539,7 @@ test('does not mutate the original options object', async t => {
 
 test('string body is passed through unchanged even if it looks like JSON', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 
 	const alreadyStringified = JSON.stringify({name: 'Alice'});
 	await fetchWithJson('/api', {method: 'POST', body: alreadyStringified});
@@ -552,7 +552,7 @@ test('string body is passed through unchanged even if it looks like JSON', async
 
 test('undefined values in object body are stripped by JSON.stringify', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 
 	await fetchWithJson('/api', {method: 'POST', body: {present: 1, missing: undefined}});
 
@@ -562,7 +562,7 @@ test('undefined values in object body are stripped by JSON.stringify', async t =
 
 test('rejects when JSON.stringify throws on circular reference', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 
 	const circular = {};
 	circular.self = circular;
@@ -576,7 +576,7 @@ test('rejects when JSON.stringify throws on circular reference', async t => {
 
 test('passes through Blob body unchanged', async t => {
 	const mockFetch = createCapturingFetch();
-	const fetchWithJson = withJsonBody(mockFetch);
+	const fetchWithJson = withJsonBody()(mockFetch);
 
 	const blob = new Blob(['hello'], {type: 'text/plain'});
 	await fetchWithJson('/api', {method: 'POST', body: blob});
@@ -600,8 +600,8 @@ test('composes with withRetry - stringified body is replayable', async t => {
 
 	const apiFetch = pipeline(
 		mockFetch,
-		withJsonBody,
-		f => withRetry(f, {retries: 1, backoff: () => 0}),
+		withJsonBody(),
+		withRetry({retries: 1, backoff: () => 0}),
 	);
 
 	const response = await apiFetch('/api', {method: 'PUT', body: {name: 'Alice'}});
@@ -629,8 +629,8 @@ test('composes with withRetry for Request body overrides using the resolved JSON
 
 	const apiFetch = pipeline(
 		mockFetch,
-		withJsonBody,
-		f => withRetry(f, {retries: 1, backoff: () => 0}),
+		withJsonBody(),
+		withRetry({retries: 1, backoff: () => 0}),
 	);
 
 	const request = new Request('https://example.com/api', {
@@ -665,8 +665,8 @@ test('composes with withRetry by serializing JSON bodies only once', async t => 
 
 	const apiFetch = pipeline(
 		mockFetch,
-		withJsonBody,
-		f => withRetry(f, {retries: 1, backoff: () => 0}),
+		withJsonBody(),
+		withRetry({retries: 1, backoff: () => 0}),
 	);
 
 	const response = await apiFetch('https://example.com/api', {
@@ -698,8 +698,8 @@ test('composes with withRetry by preserving JSON content-type for the pre-resolv
 
 	const apiFetch = pipeline(
 		mockFetch,
-		withJsonBody,
-		f => withRetry(f, {retries: 1, backoff: () => 0}),
+		withJsonBody(),
+		withRetry({retries: 1, backoff: () => 0}),
 	);
 
 	const response = await apiFetch('https://example.com/api', {
@@ -729,8 +729,8 @@ test('composes with withTokenRefresh for Request body overrides without replayin
 
 	const apiFetch = pipeline(
 		mockFetch,
-		withJsonBody,
-		f => withTokenRefresh(f, {
+		withJsonBody(),
+		withTokenRefresh({
 			async refreshToken() {
 				return 'new-token';
 			},
@@ -769,8 +769,8 @@ test('composes with withTokenRefresh by serializing JSON bodies only once', asyn
 
 	const apiFetch = pipeline(
 		mockFetch,
-		withJsonBody,
-		f => withTokenRefresh(f, {
+		withJsonBody(),
+		withTokenRefresh({
 			async refreshToken() {
 				return 'new-token';
 			},

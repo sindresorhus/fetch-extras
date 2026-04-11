@@ -49,11 +49,11 @@ function trackUploadProgress(fetchFunction = bodyConsumingFetch) {
 
 	return {
 		events,
-		fetchWithUploadProgress: withUploadProgress(fetchFunction, {
+		fetchWithUploadProgress: withUploadProgress({
 			onProgress(progress) {
 				events.push(progress);
 			},
-		}),
+		})(fetchFunction),
 	};
 }
 
@@ -183,7 +183,11 @@ test('withUploadProgress - adds duplex when wrapping streamed bodies for URL inp
 
 test('withUploadProgress - preserves byte streams for BYOB consumers', async t => {
 	const events = [];
-	const fetchWithUploadProgress = withUploadProgress(async (url, options) => {
+	const fetchWithUploadProgress = withUploadProgress({
+		onProgress(progress) {
+			events.push(progress);
+		},
+	})(async (url, options) => {
 		const reader = options.body.getReader({mode: 'byob'});
 		const {done, value} = await reader.read(new Uint8Array(8));
 
@@ -191,10 +195,6 @@ test('withUploadProgress - preserves byte streams for BYOB consumers', async t =
 		t.deepEqual([...value], [0, 1, 2]);
 
 		return new Response(null, {status: 200, statusText: 'OK'});
-	}, {
-		onProgress(progress) {
-			events.push(progress);
-		},
 	});
 
 	await fetchWithUploadProgress('https://example.com/upload', {
@@ -212,7 +212,11 @@ test('withUploadProgress - preserves byte streams for BYOB consumers', async t =
 
 test('withUploadProgress - Request overrides preserve BYOB upload bodies', async t => {
 	const events = [];
-	const fetchWithUploadProgress = withUploadProgress(async (urlOrRequest, options) => {
+	const fetchWithUploadProgress = withUploadProgress({
+		onProgress(progress) {
+			events.push(progress);
+		},
+	})(async (urlOrRequest, options) => {
 		const reader = options.body.getReader({mode: 'byob'});
 		const {done, value} = await reader.read(new Uint8Array(8));
 
@@ -221,10 +225,6 @@ test('withUploadProgress - Request overrides preserve BYOB upload bodies', async
 		t.is(options.duplex, 'half');
 
 		return new Response(null, {status: 200, statusText: 'OK'});
-	}, {
-		onProgress(progress) {
-			events.push(progress);
-		},
 	});
 
 	await fetchWithUploadProgress(new Request('https://example.com/upload', {method: 'POST', body: 'request body'}), {
@@ -269,9 +269,9 @@ test('withUploadProgress - upload progress works with string body', async t => {
 		return bodyConsumingFetch(url, options);
 	};
 
-	await withUploadProgress(mockFetch, {
+	await withUploadProgress({
 		onProgress() {},
-	})('https://example.com/upload', {
+	})(mockFetch)('https://example.com/upload', {
 		method: 'POST',
 		body: 'hello',
 	});
@@ -282,11 +282,11 @@ test('withUploadProgress - upload progress works with string body', async t => {
 
 test('withUploadProgress - upload progress does not rewrite string body before fetch infers headers', async t => {
 	let contentType;
-	const fetchWithUploadProgress = withUploadProgress((url, options) => {
+	const fetchWithUploadProgress = withUploadProgress({
+		onProgress() {},
+	})((url, options) => {
 		contentType = new Request(url, options).headers.get('content-type');
 		return new Response(null, {status: 200, statusText: 'OK'});
-	}, {
-		onProgress() {},
 	});
 
 	await fetchWithUploadProgress('https://example.com/upload', {
@@ -300,11 +300,11 @@ test('withUploadProgress - upload progress does not rewrite string body before f
 test('withUploadProgress - upload progress does not rewrite URLSearchParams body before fetch infers headers', async t => {
 	let contentType;
 	const searchParameters = new URLSearchParams({key: 'value'});
-	const fetchWithUploadProgress = withUploadProgress((url, options) => {
+	const fetchWithUploadProgress = withUploadProgress({
+		onProgress() {},
+	})((url, options) => {
 		contentType = new Request(url, options).headers.get('content-type');
 		return new Response(null, {status: 200, statusText: 'OK'});
-	}, {
-		onProgress() {},
 	});
 
 	await fetchWithUploadProgress('https://example.com/upload', {
@@ -526,15 +526,15 @@ test('withDownloadProgress and withUploadProgress - can be composed together', a
 		});
 	};
 
-	const fetchWithProgress = withDownloadProgress(withUploadProgress(mockFetch, {
-		onProgress(progress) {
-			uploadEvents.push(progress);
-		},
-	}), {
+	const fetchWithProgress = withDownloadProgress({
 		onProgress(progress) {
 			downloadEvents.push(progress);
 		},
-	});
+	})(withUploadProgress({
+		onProgress(progress) {
+			uploadEvents.push(progress);
+		},
+	})(mockFetch));
 
 	const response = await fetchWithProgress('https://example.com/upload', {
 		method: 'POST',
@@ -705,20 +705,20 @@ test('withUploadProgress - Request body overrides preserve explicit replacement 
 
 test('withUploadProgress - Request body overrides preserve existing Request body headers while blocking withHeaders body defaults', async t => {
 	let mergedRequest;
-	const fetchWithUploadProgress = withUploadProgress(withHeaders(async (urlOrRequest, options) => {
-		mergedRequest = new Request(urlOrRequest, options);
-		await new Response(mergedRequest.body).text();
-		return new Response(null, {status: 200, statusText: 'OK'});
-	}, {
+	const fetchWithUploadProgress = withUploadProgress({
+		onProgress() {},
+	})(withHeaders({
 		'content-type': 'application/json',
 		'content-language': 'fr',
 		'content-location': '/default',
 		'content-encoding': 'br',
 		'content-length': '999',
 		'x-default': 'value',
-	}), {
-		onProgress() {},
-	});
+	})(async (urlOrRequest, options) => {
+		mergedRequest = new Request(urlOrRequest, options);
+		await new Response(mergedRequest.body).text();
+		return new Response(null, {status: 200, statusText: 'OK'});
+	}));
 
 	await fetchWithUploadProgress(createUploadRequest({
 		headers: {'x-request': 'value'},
@@ -737,12 +737,12 @@ test('withUploadProgress - Request body overrides preserve existing Request body
 
 test('withUploadProgress - Request body overrides preserve blocked default header markers on rebuilt Request objects', async t => {
 	let blockedDefaultHeaderNames;
-	const fetchWithUploadProgress = withUploadProgress(async urlOrRequest => {
+	const fetchWithUploadProgress = withUploadProgress({
+		onProgress() {},
+	})(async urlOrRequest => {
 		blockedDefaultHeaderNames = urlOrRequest[blockedDefaultHeaderNamesSymbol];
 		await new Response(urlOrRequest.body).text();
 		return new Response(null, {status: 200, statusText: 'OK'});
-	}, {
-		onProgress() {},
 	});
 	const request = createUploadRequest({
 		headers: {'x-request': 'value'},
@@ -758,15 +758,15 @@ test('withUploadProgress - Request body overrides preserve blocked default heade
 
 test('withUploadProgress - Request body overrides strip inherited body headers when wrapped by withHeaders', async t => {
 	let mergedRequest;
-	const fetchWithHeaders = withHeaders(withUploadProgress(async (urlOrRequest, options) => {
+	const fetchWithHeaders = withHeaders({
+		'x-default': 'value',
+	})(withUploadProgress({
+		onProgress() {},
+	})(async (urlOrRequest, options) => {
 		mergedRequest = new Request(urlOrRequest, options);
 		await new Response(mergedRequest.body).text();
 		return new Response(null, {status: 200, statusText: 'OK'});
-	}, {
-		onProgress() {},
-	}), {
-		'x-default': 'value',
-	});
+	}));
 
 	await fetchWithHeaders(createUploadRequest({
 		headers: {
@@ -786,15 +786,15 @@ test('withUploadProgress - Request body overrides strip inherited body headers w
 
 test('withUploadProgress - Request body overrides preserve explicit body headers when wrapped by withHeaders', async t => {
 	let mergedRequest;
-	const fetchWithHeaders = withHeaders(withUploadProgress(async (urlOrRequest, options) => {
+	const fetchWithHeaders = withHeaders({
+		'x-default': 'value',
+	})(withUploadProgress({
+		onProgress() {},
+	})(async (urlOrRequest, options) => {
 		mergedRequest = new Request(urlOrRequest, options);
 		await new Response(mergedRequest.body).text();
 		return new Response(null, {status: 200, statusText: 'OK'});
-	}, {
-		onProgress() {},
-	}), {
-		'x-default': 'value',
-	});
+	}));
 
 	await fetchWithHeaders(createUploadRequest({
 		headers: {
@@ -820,15 +820,15 @@ test('withUploadProgress - Request body overrides preserve explicit body headers
 
 test('withUploadProgress - Request body overrides preserve explicit replacement content headers across the full stripped set when wrapped by withHeaders', async t => {
 	let mergedRequest;
-	const fetchWithHeaders = withHeaders(withUploadProgress(async (urlOrRequest, options) => {
+	const fetchWithHeaders = withHeaders({
+		'x-default': 'value',
+	})(withUploadProgress({
+		onProgress() {},
+	})(async (urlOrRequest, options) => {
 		mergedRequest = new Request(urlOrRequest, options);
 		await new Response(mergedRequest.body).text();
 		return new Response(null, {status: 200, statusText: 'OK'});
-	}, {
-		onProgress() {},
-	}), {
-		'x-default': 'value',
-	});
+	}));
 
 	await fetchWithHeaders(createUploadRequest({
 		headers: {
@@ -863,20 +863,20 @@ test('withUploadProgress - Request body overrides preserve explicit replacement 
 
 test('withUploadProgress - Request body overrides preserve outer withHeaders body defaults when the original Request has no body headers', async t => {
 	let mergedRequest;
-	const fetchWithHeaders = withHeaders(withUploadProgress(async (urlOrRequest, options) => {
-		mergedRequest = new Request(urlOrRequest, options);
-		await new Response(mergedRequest.body).text();
-		return new Response(null, {status: 200, statusText: 'OK'});
-	}, {
-		onProgress() {},
-	}), {
+	const fetchWithHeaders = withHeaders({
 		'content-type': 'application/json',
 		'content-language': 'fr',
 		'content-location': '/upload',
 		'content-encoding': 'br',
 		'content-length': '13',
 		'x-default': 'value',
-	});
+	})(withUploadProgress({
+		onProgress() {},
+	})(async (urlOrRequest, options) => {
+		mergedRequest = new Request(urlOrRequest, options);
+		await new Response(mergedRequest.body).text();
+		return new Response(null, {status: 200, statusText: 'OK'});
+	}));
 
 	await fetchWithHeaders(new Request('https://example.com/upload', {
 		method: 'POST',
@@ -896,19 +896,19 @@ test('withUploadProgress - Request body overrides preserve outer withHeaders bod
 
 test('withUploadProgress - Request body overrides preserve explicit per-call body headers over blocked withHeaders defaults', async t => {
 	let mergedRequest;
-	const fetchWithUploadProgress = withUploadProgress(withHeaders(async (urlOrRequest, options) => {
-		mergedRequest = new Request(urlOrRequest, options);
-		await new Response(mergedRequest.body).text();
-		return new Response(null, {status: 200, statusText: 'OK'});
-	}, {
+	const fetchWithUploadProgress = withUploadProgress({
+		onProgress() {},
+	})(withHeaders({
 		'content-type': 'application/json',
 		'content-language': 'fr',
 		'content-location': '/default',
 		'content-encoding': 'br',
 		'x-default': 'value',
-	}), {
-		onProgress() {},
-	});
+	})(async (urlOrRequest, options) => {
+		mergedRequest = new Request(urlOrRequest, options);
+		await new Response(mergedRequest.body).text();
+		return new Response(null, {status: 200, statusText: 'OK'});
+	}));
 
 	await fetchWithUploadProgress(createUploadRequest({
 		headers: {'x-request': 'value'},
@@ -934,17 +934,17 @@ test('withUploadProgress - Request body overrides preserve explicit per-call bod
 
 test('withUploadProgress - Request body overrides preserve explicit per-call content-length over blocked withHeaders defaults', async t => {
 	let mergedRequest;
-	const fetchWithUploadProgress = withUploadProgress(withHeaders(async (urlOrRequest, options) => {
-		mergedRequest = new Request(urlOrRequest, options);
-		await new Response(mergedRequest.body).text();
-		return new Response(null, {status: 200, statusText: 'OK'});
-	}, {
+	const fetchWithUploadProgress = withUploadProgress({
+		onProgress() {},
+	})(withHeaders({
 		'content-type': 'application/json',
 		'content-length': '999',
 		'x-default': 'value',
-	}), {
-		onProgress() {},
-	});
+	})(async (urlOrRequest, options) => {
+		mergedRequest = new Request(urlOrRequest, options);
+		await new Response(mergedRequest.body).text();
+		return new Response(null, {status: 200, statusText: 'OK'});
+	}));
 
 	await fetchWithUploadProgress(createUploadRequest({
 		headers: {'x-request': 'value'},
@@ -966,21 +966,21 @@ test('withUploadProgress - Request body overrides preserve explicit per-call con
 
 test('withUploadProgress - Request body overrides preserve explicit per-call body headers across nested withHeaders wrappers', async t => {
 	let mergedRequest;
-	const fetchWithUploadProgress = withUploadProgress(withHeaders(withHeaders(async (urlOrRequest, options) => {
-		mergedRequest = new Request(urlOrRequest, options);
-		await new Response(mergedRequest.body).text();
-		return new Response(null, {status: 200, statusText: 'OK'});
-	}, {
-		'content-type': 'application/json',
-		'content-language': 'fr',
-		'x-inner': 'value',
-	}), {
+	const fetchWithUploadProgress = withUploadProgress({
+		onProgress() {},
+	})(withHeaders({
 		'content-location': '/default',
 		'content-encoding': 'br',
 		'x-outer': 'value',
-	}), {
-		onProgress() {},
-	});
+	})(withHeaders({
+		'content-type': 'application/json',
+		'content-language': 'fr',
+		'x-inner': 'value',
+	})(async (urlOrRequest, options) => {
+		mergedRequest = new Request(urlOrRequest, options);
+		await new Response(mergedRequest.body).text();
+		return new Response(null, {status: 200, statusText: 'OK'});
+	})));
 
 	await fetchWithUploadProgress(createUploadRequest({
 		headers: {'x-request': 'value'},
@@ -1007,19 +1007,19 @@ test('withUploadProgress - Request body overrides preserve explicit per-call bod
 
 test('withUploadProgress - Request body overrides preserve explicit per-call content-length across case-insensitive nested withHeaders wrappers', async t => {
 	let mergedRequest;
-	const fetchWithUploadProgress = withUploadProgress(withHeaders(withHeaders(async (urlOrRequest, options) => {
+	const fetchWithUploadProgress = withUploadProgress({
+		onProgress() {},
+	})(withHeaders({
+		'Content-Length': '999',
+		'x-outer': 'value',
+	})(withHeaders({
+		'Content-Type': 'application/json',
+		'x-inner': 'value',
+	})(async (urlOrRequest, options) => {
 		mergedRequest = new Request(urlOrRequest, options);
 		await new Response(mergedRequest.body).text();
 		return new Response(null, {status: 200, statusText: 'OK'});
-	}, {
-		'Content-Type': 'application/json',
-		'x-inner': 'value',
-	}), {
-		'Content-Length': '999',
-		'x-outer': 'value',
-	}), {
-		onProgress() {},
-	});
+	})));
 
 	await fetchWithUploadProgress(createUploadRequest({
 		headers: {'x-request': 'value'},
@@ -1042,21 +1042,21 @@ test('withUploadProgress - Request body overrides preserve explicit per-call con
 
 test('withUploadProgress - Request body overrides preserve existing Request body headers while blocking case-insensitive nested withHeaders body defaults', async t => {
 	let mergedRequest;
-	const fetchWithUploadProgress = withUploadProgress(withHeaders(withHeaders(async (urlOrRequest, options) => {
-		mergedRequest = new Request(urlOrRequest, options);
-		await new Response(mergedRequest.body).text();
-		return new Response(null, {status: 200, statusText: 'OK'});
-	}, {
-		'Content-Type': 'application/json',
-		'Content-Language': 'fr',
-		'x-inner': 'value',
-	}), {
+	const fetchWithUploadProgress = withUploadProgress({
+		onProgress() {},
+	})(withHeaders({
 		'Content-Length': '999',
 		'Content-Encoding': 'br',
 		'x-outer': 'value',
-	}), {
-		onProgress() {},
-	});
+	})(withHeaders({
+		'Content-Type': 'application/json',
+		'Content-Language': 'fr',
+		'x-inner': 'value',
+	})(async (urlOrRequest, options) => {
+		mergedRequest = new Request(urlOrRequest, options);
+		await new Response(mergedRequest.body).text();
+		return new Response(null, {status: 200, statusText: 'OK'});
+	})));
 
 	await fetchWithUploadProgress(createUploadRequest({
 		headers: {'x-request': 'value'},
@@ -1146,21 +1146,21 @@ test('withUploadProgress - Request body overrides preserve Request priority when
 
 test('withUploadProgress - Request body overrides preserve existing Request body headers while blocking nested withHeaders body defaults', async t => {
 	let mergedRequest;
-	const fetchWithUploadProgress = withUploadProgress(withHeaders(withHeaders(async (urlOrRequest, options) => {
-		mergedRequest = new Request(urlOrRequest, options);
-		await new Response(mergedRequest.body).text();
-		return new Response(null, {status: 200, statusText: 'OK'});
-	}, {
-		'content-type': 'application/json',
-		'content-language': 'fr',
-		'x-inner': 'value',
-	}), {
+	const fetchWithUploadProgress = withUploadProgress({
+		onProgress() {},
+	})(withHeaders({
 		'content-length': '999',
 		'content-encoding': 'br',
 		'x-outer': 'value',
-	}), {
-		onProgress() {},
-	});
+	})(withHeaders({
+		'content-type': 'application/json',
+		'content-language': 'fr',
+		'x-inner': 'value',
+	})(async (urlOrRequest, options) => {
+		mergedRequest = new Request(urlOrRequest, options);
+		await new Response(mergedRequest.body).text();
+		return new Response(null, {status: 200, statusText: 'OK'});
+	})));
 
 	await fetchWithUploadProgress(createUploadRequest({
 		headers: {'x-request': 'value'},
@@ -1229,7 +1229,7 @@ test('withUploadProgress - passes through unchanged when no callback provided', 
 		return new Response(null, {status: 200, statusText: 'OK'});
 	};
 
-	const fetchWithUploadProgress = withUploadProgress(mockFetch);
+	const fetchWithUploadProgress = withUploadProgress()(mockFetch);
 
 	await fetchWithUploadProgress('https://example.com/upload', {
 		method: 'POST',
@@ -1248,12 +1248,12 @@ test('withUploadProgress - passes through unchanged when no callback provided', 
 
 test('withUploadProgress - propagates fetch errors without firing progress events', async t => {
 	const events = [];
-	const fetchWithUploadProgress = withUploadProgress(async () => {
-		throw new Error('network failure');
-	}, {
+	const fetchWithUploadProgress = withUploadProgress({
 		onProgress(progress) {
 			events.push(progress);
 		},
+	})(async () => {
+		throw new Error('network failure');
 	});
 
 	await t.throwsAsync(

@@ -8,10 +8,10 @@ import {
 
 const apiFetch = pipeline(
 	fetch,
-	f => withTimeout(f, 5000),
-	f => withBaseUrl(f, 'https://httpbun.com'),
-	f => withHeaders(f, {Authorization: 'Bearer token'}),
-	withHttpError,
+	withTimeout(5000),
+	withBaseUrl('https://httpbun.com'),
+	withHeaders({Authorization: 'Bearer token'}),
+	withHttpError(),
 );
 
 // GET request - returns the headers we sent

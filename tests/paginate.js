@@ -503,7 +503,12 @@ test.serial('paginate - preserves Request configuration across pages', async t =
 test.serial('paginate - bodyful requests re-resolve async withHeaders defaults on every page', async t => {
 	let defaultHeaderNumber = 0;
 	const seenRequests = [];
-	const fetchFunction = withHeaders(async (input, options) => {
+	const fetchFunction = withHeaders(async () => {
+		defaultHeaderNumber++;
+		return {
+			'x-default': `value-${defaultHeaderNumber}`,
+		};
+	})(async (input, options) => {
 		const request = input instanceof Request ? input : new Request(input, options);
 		const pageParameter = new URL(request.url).searchParams.get('page');
 		const page = pageParameter ? Number.parseInt(pageParameter, 10) : 1;
@@ -529,11 +534,6 @@ test.serial('paginate - bodyful requests re-resolve async withHeaders defaults o
 				},
 			},
 			json: async () => [page],
-		};
-	}, async () => {
-		defaultHeaderNumber++;
-		return {
-			'x-default': `value-${defaultHeaderNumber}`,
 		};
 	});
 
@@ -565,7 +565,12 @@ test.serial('paginate - bodyful requests re-resolve async withHeaders defaults o
 test.serial('paginate - Request input re-resolves async withHeaders defaults on every page', async t => {
 	let defaultHeaderNumber = 0;
 	const seenRequests = [];
-	const fetchFunction = withHeaders(async (input, options) => {
+	const fetchFunction = withHeaders(async () => {
+		defaultHeaderNumber++;
+		return {
+			'x-default': `value-${defaultHeaderNumber}`,
+		};
+	})(async (input, options) => {
 		const request = input instanceof Request ? input : new Request(input, options);
 		const pageParameter = new URL(request.url).searchParams.get('page');
 		const page = pageParameter ? Number.parseInt(pageParameter, 10) : 1;
@@ -591,11 +596,6 @@ test.serial('paginate - Request input re-resolves async withHeaders defaults on 
 				},
 			},
 			json: async () => [page],
-		};
-	}, async () => {
-		defaultHeaderNumber++;
-		return {
-			'x-default': `value-${defaultHeaderNumber}`,
 		};
 	});
 
@@ -630,8 +630,17 @@ test.serial('paginate - Request input preserves one resolved async withHeaders s
 	let tokenNumber = 0;
 	const hookAuthorizations = [];
 	const fetchAuthorizations = [];
-	const fetchFunction = withHooks(
-		withHeaders(async request => {
+	const fetchFunction = withHooks({
+		beforeRequest({options}) {
+			hookAuthorizations.push(new Headers(options.headers).get('authorization'));
+		},
+	})(
+		withHeaders(async () => {
+			tokenNumber++;
+			return {
+				authorization: `Bearer ${tokenNumber}`,
+			};
+		})(async request => {
 			const nextRequest = request instanceof Request ? request : new Request(request);
 			const pageParameter = new URL(nextRequest.url).searchParams.get('page');
 			const page = pageParameter ? Number.parseInt(pageParameter, 10) : 1;
@@ -653,17 +662,7 @@ test.serial('paginate - Request input preserves one resolved async withHeaders s
 				},
 				json: async () => [page],
 			};
-		}, async () => {
-			tokenNumber++;
-			return {
-				authorization: `Bearer ${tokenNumber}`,
-			};
 		}),
-		{
-			beforeRequest({options}) {
-				hookAuthorizations.push(new Headers(options.headers).get('authorization'));
-			},
-		},
 	);
 
 	const items = await paginate.all(new Request('http://example.com/?page=1', {
@@ -679,7 +678,12 @@ test.serial('paginate - Request input preserves one resolved async withHeaders s
 test.serial('paginate - streamed body requests re-resolve async withHeaders defaults on every page', async t => {
 	let defaultHeaderNumber = 0;
 	const seenRequests = [];
-	const fetchFunction = withHeaders(async (input, options) => {
+	const fetchFunction = withHeaders(async () => {
+		defaultHeaderNumber++;
+		return {
+			'x-default': `value-${defaultHeaderNumber}`,
+		};
+	})(async (input, options) => {
 		const request = input instanceof Request ? input : new Request(input, options);
 		const pageParameter = new URL(request.url).searchParams.get('page');
 		const page = pageParameter ? Number.parseInt(pageParameter, 10) : 1;
@@ -705,11 +709,6 @@ test.serial('paginate - streamed body requests re-resolve async withHeaders defa
 				},
 			},
 			json: async () => [page],
-		};
-	}, async () => {
-		defaultHeaderNumber++;
-		return {
-			'x-default': `value-${defaultHeaderNumber}`,
 		};
 	});
 
@@ -744,29 +743,31 @@ test.serial('paginate - streamed body requests re-resolve async withHeaders defa
 
 test.serial('paginate - withTimeout applies while re-resolving async headers for later pages', async t => {
 	let callCount = 0;
-	const fetchFunction = withTimeout(withHeaders(async request => {
-		callCount++;
+	const fetchFunction = withTimeout(10)(
+		withHeaders(async () => callCount === 0
+			? {'x-default': 'page-1'}
+			: new Promise(resolve => {
+				setTimeout(resolve, 100, {'x-default': 'page-2'});
+			}))(async request => {
+			callCount++;
 
-		return {
-			ok: true,
-			status: 200,
-			url: request.url,
-			headers: {
-				get(name) {
-					if (name === 'Link' && callCount === 1) {
-						return '<https://example.com/api?page=2>; rel="next"';
-					}
+			return {
+				ok: true,
+				status: 200,
+				url: request.url,
+				headers: {
+					get(name) {
+						if (name === 'Link' && callCount === 1) {
+							return '<https://example.com/api?page=2>; rel="next"';
+						}
 
-					return undefined;
+						return undefined;
+					},
 				},
-			},
-			json: async () => [callCount],
-		};
-	}, async () => callCount === 0
-		? {'x-default': 'page-1'}
-		: new Promise(resolve => {
-			setTimeout(resolve, 100, {'x-default': 'page-2'});
-		})), 10);
+				json: async () => [callCount],
+			};
+		}),
+	);
 
 	const error = await t.throwsAsync(() => paginate.all('https://example.com/api?page=1', {
 		fetchFunction,
@@ -802,7 +803,7 @@ test.serial('paginate - URL input preserves init.body for withJsonBody on the fi
 	await paginate.all('https://example.com/api', {
 		method: 'POST',
 		body: {foo: 1},
-		fetchFunction: withJsonBody(mockFetch),
+		fetchFunction: withJsonBody()(mockFetch),
 	});
 
 	t.deepEqual(seenRequests, [{
@@ -818,7 +819,7 @@ test.serial('paginate - URL input preserves withJsonBody headers on later reques
 	const items = await paginate.all('https://example.com/api?page=1', {
 		method: 'POST',
 		body: {page: 1},
-		fetchFunction: withJsonBody(async (input, options) => {
+		fetchFunction: withJsonBody()(async (input, options) => {
 			const request = input instanceof Request ? input : new Request(input, options);
 			const page = seenRequests.length + 1;
 
@@ -872,7 +873,7 @@ test.serial('paginate - Request input preserves withJsonBody body transforms whe
 
 	const items = await paginate.all(input, {
 		body: {page: 1},
-		fetchFunction: withJsonBody(async (request, options) => {
+		fetchFunction: withJsonBody()(async (request, options) => {
 			const nextRequest = request instanceof Request ? request : new Request(request, options);
 			const page = seenRequests.length + 1;
 
@@ -921,7 +922,10 @@ test.serial('paginate - Request input preserves withJsonBody body transforms whe
 test.serial('paginate - URL input preserves replayable init.body for withRetry on the first request', async t => {
 	let callCount = 0;
 	const seenBodies = [];
-	const fetchFunction = withRetry(async (input, options) => {
+	const fetchFunction = withRetry({
+		retries: 1,
+		backoff: () => 0,
+	})(async (input, options) => {
 		const request = input instanceof Request ? input : new Request(input, options);
 		callCount++;
 		seenBodies.push(await request.text());
@@ -930,9 +934,6 @@ test.serial('paginate - URL input preserves replayable init.body for withRetry o
 			status: callCount === 1 ? 503 : 200,
 			headers: {'content-type': 'application/json'},
 		});
-	}, {
-		retries: 1,
-		backoff: () => 0,
 	});
 
 	const items = await paginate.all('https://example.com/api', {
@@ -1198,9 +1199,9 @@ test.serial('paginate - reapplies withHeaders Authorization defaults on cross-or
 	const {seenRequests, fetchFunction} = createRecordedRequestFetch({
 		nextLink: `<${crossOriginNextUrl}>; rel="next"`,
 	});
-	const fetchWithHeaders = withHeaders(fetchFunction, {
+	const fetchWithHeaders = withHeaders({
 		authorization: 'Bearer secret',
-	});
+	})(fetchFunction);
 
 	const items = await paginate.all('https://api.example.com/?page=1', {
 		fetchFunction: fetchWithHeaders,
@@ -1223,9 +1224,9 @@ test.serial('paginate - reapplies async withHeaders Authorization defaults on cr
 	const {seenRequests, fetchFunction} = createRecordedRequestFetch({
 		nextLink: `<${crossOriginNextUrl}>; rel="next"`,
 	});
-	const fetchWithHeaders = withHeaders(fetchFunction, async () => ({
+	const fetchWithHeaders = withHeaders(async () => ({
 		authorization: 'Bearer secret',
-	}));
+	}))(fetchFunction);
 
 	const items = await paginate.all('https://api.example.com/?page=1', {
 		fetchFunction: fetchWithHeaders,
@@ -1246,7 +1247,11 @@ test.serial('paginate - reapplies async withHeaders Authorization defaults on cr
 
 test.serial('paginate - reapplies withHeaders defaults after a cross-origin redirect', async t => {
 	const seenRequests = [];
-	const fetchWithHeaders = withHeaders(async (input, options) => {
+	const fetchWithHeaders = withHeaders({
+		authorization: 'Bearer secret',
+		accept: 'application/json',
+		'x-api-version': '2026-03',
+	})(async (input, options) => {
 		const request = input instanceof Request ? input : new Request(input, options);
 		const page = seenRequests.length + 1;
 
@@ -1272,10 +1277,6 @@ test.serial('paginate - reapplies withHeaders defaults after a cross-origin redi
 			},
 			json: async () => [page],
 		};
-	}, {
-		authorization: 'Bearer secret',
-		accept: 'application/json',
-		'x-api-version': '2026-03',
 	});
 
 	const items = await paginate.all('https://api.example.com/?page=1', {
@@ -1302,7 +1303,10 @@ test.serial('paginate - reapplies withHeaders defaults after a cross-origin redi
 test.serial('paginate - async withHeaders defaults re-resolve per page across cross-origin redirect', async t => {
 	let defaultHeaderNumber = 0;
 	const seenRequests = [];
-	const fetchWithHeaders = withHeaders(async (input, options) => {
+	const fetchWithHeaders = withHeaders(async () => {
+		defaultHeaderNumber++;
+		return {'x-default': `value-${defaultHeaderNumber}`};
+	})(async (input, options) => {
 		const request = input instanceof Request ? input : new Request(input, options);
 		const page = seenRequests.length + 1;
 
@@ -1326,9 +1330,6 @@ test.serial('paginate - async withHeaders defaults re-resolve per page across cr
 			},
 			json: async () => [page],
 		};
-	}, async () => {
-		defaultHeaderNumber++;
-		return {'x-default': `value-${defaultHeaderNumber}`};
 	});
 
 	const items = await paginate.all('https://api.example.com/?page=1', {

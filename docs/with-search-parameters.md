@@ -1,13 +1,13 @@
 # withSearchParameters
 
-## withSearchParameters(fetchFunction, defaultSearchParameters)
+## withSearchParameters(defaultSearchParameters)
 
-Returns a wrapped fetch function that includes default search parameters on every request. Per-call parameters in the URL take priority over the defaults, so you can always override a default on a specific request.
+Wraps a fetch function to include default search parameters on every request. Per-call parameters in the URL take priority over the defaults, so you can always override a default on a specific request.
 
 ```js
 import {withSearchParameters} from 'fetch-extras';
 
-const fetchWithParameters = withSearchParameters(fetch, {apiKey: 'my-key', format: 'json'});
+const fetchWithParameters = withSearchParameters({apiKey: 'my-key', format: 'json'})(fetch);
 
 const response = await fetchWithParameters('/users');
 // Requests /users?apiKey=my-key&format=json
@@ -21,12 +21,11 @@ const response2 = await fetchWithParameters('/users?format=xml');
 
 ## Parameters
 
-- `fetchFunction` (`typeof fetch`) - The fetch function to wrap (usually the global `fetch`).
-- `defaultSearchParameters` (`Record<string, string> | URLSearchParams | string[][]`) - Default search parameters to include on every request. Accepts a plain object, a `URLSearchParams` instance, or an array of `[name, value]` tuples.
+- `defaultSearchParameters` (`Record<string, string> | URLSearchParams | [string, string][]`) - Default search parameters to include on every request. Accepts a plain object, a `URLSearchParams` instance, or an array of `[name, value]` tuples.
 
 ## Returns
 
-A wrapped fetch function that merges the default search parameters into every request URL.
+A function that takes a fetch function and returns a wrapped fetch function that merges the default search parameters into every request URL.
 
 > [!NOTE]
 > String URLs and `URL` objects are modified. `Request` objects are passed through unchanged.
@@ -43,9 +42,9 @@ import {pipeline, withSearchParameters, withBaseUrl, withHttpError} from 'fetch-
 
 const apiFetch = pipeline(
 	fetch,
-	f => withBaseUrl(f, 'https://api.example.com'),
-	f => withSearchParameters(f, {apiKey: 'my-key'}),
-	withHttpError,
+	withBaseUrl('https://api.example.com'),
+	withSearchParameters({apiKey: 'my-key'}),
+	withHttpError(),
 );
 
 const response = await apiFetch('/users');

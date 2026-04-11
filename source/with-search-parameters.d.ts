@@ -1,5 +1,5 @@
 /**
-Returns a wrapped fetch function that includes default search parameters on every request. Per-call parameters in the URL take priority over the defaults, so you can always override a default on a specific request.
+Wraps a fetch function to include default search parameters on every request. Per-call parameters in the URL take priority over the defaults, so you can always override a default on a specific request.
 
 String URLs and `URL` objects are modified. `Request` objects are passed through unchanged.
 
@@ -7,15 +7,14 @@ In documented `pipeline()` order, place `withSearchParameters` after `withBaseUr
 
 Can be combined with other `with*` functions.
 
-@param fetchFunction - The fetch function to wrap (usually the global `fetch`).
 @param defaultSearchParameters - Default search parameters to include on every request. Accepts a plain object, a `URLSearchParams` instance, or an array of `[name, value]` tuples.
-@returns A wrapped fetch function that merges the default search parameters into every request URL.
+@returns A wrapper that takes a fetch function and returns a wrapped fetch function that merges the default search parameters into every request URL.
 
 @example
 ```
 import {withSearchParameters} from 'fetch-extras';
 
-const fetchWithParameters = withSearchParameters(fetch, {apiKey: 'my-key', format: 'json'});
+const fetchWithParameters = withSearchParameters({apiKey: 'my-key', format: 'json'})(fetch);
 
 const response = await fetchWithParameters('/users');
 // Requests /users?apiKey=my-key&format=json
@@ -33,15 +32,14 @@ import {pipeline, withSearchParameters, withBaseUrl, withHttpError} from 'fetch-
 
 const apiFetch = pipeline(
 	fetch,
-	f => withBaseUrl(f, 'https://api.example.com'),
-	f => withSearchParameters(f, {apiKey: 'my-key'}),
-	withHttpError,
+	withBaseUrl('https://api.example.com'),
+	withSearchParameters({apiKey: 'my-key'}),
+	withHttpError(),
 );
 
 const response = await apiFetch('/users');
 ```
 */
 export function withSearchParameters(
-	fetchFunction: typeof fetch,
 	defaultSearchParameters: Record<string, string> | URLSearchParams | ReadonlyArray<readonly [string, string]>
-): typeof fetch;
+): (fetchFunction: typeof fetch) => typeof fetch;
