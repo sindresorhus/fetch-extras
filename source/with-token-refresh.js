@@ -13,9 +13,11 @@ import {
 /**
 Wraps a fetch function to automatically refresh the token and retry the request on a `401 Unauthorized` response.
 
+Concurrent 401 responses that overlap while a refresh is still pending share a single `refreshToken` call when they have the same effective `Authorization` header, preventing token invalidation races across requests for the same auth context. Requests with different effective `Authorization` headers refresh separately.
+
 @param {typeof fetch} fetchFunction - The fetch function to wrap (usually the global `fetch`).
 @param {object} options
-@param {() => Promise<string>} options.refreshToken - Called when a 401 response is received. Should return the new token string.
+@param {() => string | Promise<string>} options.refreshToken - Called when a 401 response is received. Should return the new token string.
 @returns {typeof fetch} A wrapped fetch function that retries once with a refreshed `Authorization: Bearer <token>` header on 401 responses.
 */
 export function withTokenRefresh(fetchFunction, {refreshToken}) {

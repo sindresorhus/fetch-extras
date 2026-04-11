@@ -3,7 +3,7 @@ Wraps a fetch function to automatically refresh the token and retry the request 
 
 On a 401 response, calls `refreshToken` to obtain a new token, then retries the request once with `Authorization: Bearer <token>`. If the refresh fails or the retry also returns a non-2xx status, the response is returned as-is. Abort signals are still respected and will reject the call.
 
-Concurrent 401 responses that overlap while a refresh is still pending share a single `refreshToken` call to prevent token invalidation races.
+Concurrent 401 responses that overlap while a refresh is still pending share a single `refreshToken` call when they have the same effective `Authorization` header, preventing token invalidation races across requests for the same auth context. Requests with different effective `Authorization` headers refresh separately.
 
 > Important: Deduplication only applies while the refresh promise is still pending. Once it settles, it is forgotten immediately. A later `401` starts a new refresh on purpose instead of reusing a settled token result.
 

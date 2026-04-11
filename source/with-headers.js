@@ -21,7 +21,7 @@ Can be combined with other `with*` functions.
 @returns {typeof fetch} A wrapped fetch function that merges the default headers into every request.
 
 The header function does not receive the request URL or options. If you need headers that vary per request, use `withHooks` with a `beforeRequest` hook instead.
-Function-based defaults are request-scoped, not sequence-scoped. Wrappers that replay the same request, such as `withRetry()`, freeze the resolved headers for that replay batch. Wrappers that build later requests, such as `paginate()`, re-resolve them for each request.
+Function-based defaults are request-scoped, not sequence-scoped. Each new wrapped fetch call resolves them again. Wrappers such as `withRetry()` and `paginate()` call into `withHeaders()` separately for each attempt or page, so the header function can run again for each one.
 */
 export function withHeaders(fetchFunction, defaultHeaders) {
 	const isFunction = typeof defaultHeaders === 'function';

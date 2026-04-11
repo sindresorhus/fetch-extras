@@ -611,7 +611,7 @@ test('composes with withRetry - stringified body is replayable', async t => {
 	t.is(attempt, 2);
 });
 
-test('composes with withRetry for Request body overrides without replaying stale body headers', async t => {
+test('composes with withRetry for Request body overrides using the resolved JSON body headers on retry', async t => {
 	const contentTypes = [];
 	const contentLanguages = [];
 
@@ -680,6 +680,35 @@ test('composes with withRetry by serializing JSON bodies only once', async t => 
 
 	t.is(response.status, 200);
 	t.deepEqual(bodies, ['{"nonce":1}', '{"nonce":1}']);
+});
+
+test('composes with withRetry by preserving JSON content-type for the pre-resolved body on every attempt', async t => {
+	const contentTypes = [];
+
+	const mockFetch = async (urlOrRequest, options = {}) => {
+		const request = new Request(urlOrRequest, options);
+		contentTypes.push(request.headers.get('content-type'));
+
+		if (contentTypes.length === 1) {
+			return new Response(null, {status: 503});
+		}
+
+		return new Response(null, {status: 200});
+	};
+
+	const apiFetch = pipeline(
+		mockFetch,
+		withJsonBody,
+		f => withRetry(f, {retries: 1, backoff: () => 0}),
+	);
+
+	const response = await apiFetch('https://example.com/api', {
+		method: 'PUT',
+		body: {name: 'Alice'},
+	});
+
+	t.is(response.status, 200);
+	t.deepEqual(contentTypes, ['application/json', 'application/json']);
 });
 
 test('composes with withTokenRefresh for Request body overrides without replaying stale body headers', async t => {

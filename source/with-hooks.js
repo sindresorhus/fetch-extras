@@ -1,16 +1,15 @@
 import {
 	copyFetchMetadata,
 	defersFetchStartSymbol,
-	getFetchSignal,
 	getResolvedRequestHeaders,
 	getRequestOptions,
-	getRequestSignal,
 	notifyFetchStart,
 	resolveRequestBody,
 	resolveRequestBodySymbol,
 	resolveRequestHeadersSymbol,
 	resolveRequestUrl,
 	waitForAbortable,
+	withFetchSignal,
 	withResolvedRequestHeaders,
 } from './utilities.js';
 
@@ -23,7 +22,7 @@ Design note: `withHooks` is one function rather than separate `withBeforeRequest
 /**
 Wraps a fetch function with hooks that run before each request and after each response.
 
-This is the recommended way to add custom logic (logging, metrics, dynamic headers, response transformation) in documented `pipeline()` order after request-building wrappers, `withRetry()`, and `withTokenRefresh()`, but before `withHttpError()`. When combined with `withTokenRefresh()`, hooks observe the public call and the final response returned to the caller. The internal refresh retry is not re-hooked.
+This is the recommended way to add custom logic (logging, metrics, dynamic headers, response transformation) in documented `pipeline()` order after request-building wrappers, `withRetry()`, and `withTokenRefresh()`, but before `withHttpError()`. Hooks receive the effective request state for their stage, including URL, headers, and replayable body transformations already prepared by upstream wrappers in documented `pipeline()` order. When combined with `withTokenRefresh()`, hooks observe the public call and the final response returned to the caller. The internal refresh retry is not re-hooked.
 
 @param {typeof fetch} fetchFunction - The fetch function to wrap (usually the global `fetch`).
 @param {object} [options]
@@ -40,31 +39,7 @@ export function withHooks(fetchFunction, {beforeRequest, afterResponse} = {}) {
 		});
 	};
 
-	const getFetchOptions = (urlOrRequest, options, signal, headers) => {
-		// Strip the prototype-only inherited body marker before calling the inner fetch so no-op hooks do not change downstream wrapper semantics.
-		let fetchOptions = inheritedHookBodies.has(options) ? {...options} : options;
-
-		if (headers !== undefined) {
-			fetchOptions = withResolvedRequestHeaders(fetchOptions, headers);
-		}
-
-		const requestSignal = getRequestSignal(urlOrRequest, fetchOptions);
-		return requestSignal === signal
-			? fetchOptions
-			: {...fetchOptions, signal};
-	};
-
-	const shouldClearInheritedBody = (request, hookOptions, options) => {
-		if (!(request instanceof Request) || hookOptions.body === undefined || Object.hasOwn(options, 'body')) {
-			return false;
-		}
-
-		return ['GET', 'HEAD'].includes(options.method?.toUpperCase());
-	};
-
 	const fetchWithHooks = async (urlOrRequest, options = {}) => {
-		const getLifecycleSignal = options_ => getFetchSignal(fetchFunction, getRequestSignal(urlOrRequest, options_));
-
 		const getHookOptions = async (options_ = {}) => {
 			const effectiveOptions = getRequestOptions(urlOrRequest, options_);
 
@@ -82,7 +57,7 @@ export function withHooks(fetchFunction, {beforeRequest, afterResponse} = {}) {
 				}
 			}
 
-			const lifecycleSignal = getLifecycleSignal(options_);
+			const lifecycleSignal = withFetchSignal(fetchFunction, urlOrRequest, options_).signal;
 
 			if (lifecycleSignal !== undefined) {
 				effectiveOptions.signal = lifecycleSignal;
@@ -91,26 +66,49 @@ export function withHooks(fetchFunction, {beforeRequest, afterResponse} = {}) {
 			return effectiveOptions;
 		};
 
+		const getFetchOptions = (options_, headers, signal) => {
+			// Strip the prototype-only inherited body marker before calling the inner fetch so no-op hooks do not change downstream wrapper semantics.
+			let fetchOptions = inheritedHookBodies.has(options_) ? {...options_} : options_;
+
+			if (headers !== undefined) {
+				fetchOptions = withResolvedRequestHeaders(fetchOptions, headers);
+			}
+
+			return signal === undefined
+				? fetchOptions
+				: {...fetchOptions, signal};
+		};
+
+		const shouldClearInheritedBody = (request, hookOptions, options_) => {
+			if (!(request instanceof Request) || hookOptions.body === undefined || Object.hasOwn(options_, 'body')) {
+				return false;
+			}
+
+			return ['GET', 'HEAD'].includes(options_.method?.toUpperCase());
+		};
+
 		const url = resolveRequestUrl(fetchFunction, urlOrRequest);
 		let hookOptions = await getHookOptions(options);
 
 		if (beforeRequest) {
-			let result = await waitForAbortable(() => beforeRequest({url, options: hookOptions}), hookOptions.signal);
+			const result = await waitForAbortable(() => beforeRequest({url, options: hookOptions}), hookOptions.signal);
 			if (result instanceof Response) {
 				return result;
 			}
 
 			if (result !== undefined) {
-				if (shouldClearInheritedBody(urlOrRequest, hookOptions, result)) {
-					result = {...result, body: undefined};
+				let nextOptions = result;
+
+				if (shouldClearInheritedBody(urlOrRequest, hookOptions, nextOptions)) {
+					nextOptions = {...nextOptions, body: undefined};
 				}
 
-				options = result;
+				options = nextOptions;
 				hookOptions = await getHookOptions(options);
 			}
 		}
 
-		const finalFetchOptions = getFetchOptions(urlOrRequest, options, hookOptions.signal, hookOptions.headers);
+		const finalFetchOptions = getFetchOptions(options, hookOptions.headers, hookOptions.signal);
 		const fetchInput = urlOrRequest instanceof Request && Object.hasOwn(finalFetchOptions, 'body') && finalFetchOptions.body === undefined
 			? url
 			: urlOrRequest;
