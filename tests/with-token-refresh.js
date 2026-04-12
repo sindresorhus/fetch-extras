@@ -93,6 +93,27 @@ const getAuthorizationHeader = (urlOrRequest, options = {}) => urlOrRequest inst
 	? new Request(urlOrRequest, options).headers.get('Authorization')
 	: new Headers(options.headers).get('Authorization');
 
+const setMockLocation = (t, href = 'https://example.com/') => {
+	const previousLocation = globalThis.location;
+	Object.defineProperty(globalThis, 'location', {
+		value: new URL(href),
+		configurable: true,
+		writable: true,
+	});
+	t.teardown(() => {
+		if (previousLocation === undefined) {
+			delete globalThis.location;
+			return;
+		}
+
+		Object.defineProperty(globalThis, 'location', {
+			value: previousLocation,
+			configurable: true,
+			writable: true,
+		});
+	});
+};
+
 test('passes through non-401 responses without refreshing', async t => {
 	const {mockFetch, getCallCount} = createMockFetch({initialStatus: 200});
 	let refreshCalled = false;
@@ -123,6 +144,35 @@ test('refreshes token and retries on 401', async t => {
 	t.is(response.status, 200);
 	t.is(getCallCount(), 2);
 	t.is(response.headers.get('Authorization'), 'Bearer new-token');
+});
+
+test('does not refresh or retry when the original Authorization header is not Bearer', async t => {
+	let refreshCalled = false;
+	let callCount = 0;
+
+	const fetchWithRefresh = withTokenRefresh({
+		async refreshToken() {
+			refreshCalled = true;
+			return 'new-token';
+		},
+	})(async (_url, options = {}) => {
+		callCount++;
+		return new Response(null, {
+			status: 401,
+			headers: new Headers(options.headers),
+		});
+	});
+
+	const response = await fetchWithRefresh('https://example.com/api', {
+		headers: {
+			Authorization: 'Basic dXNlcjpwYXNz',
+		},
+	});
+
+	t.is(response.status, 401);
+	t.is(callCount, 1);
+	t.false(refreshCalled);
+	t.is(response.headers.get('Authorization'), 'Basic dXNlcjpwYXNz');
 });
 
 test('cancels the discarded 401 response body before retrying', async t => {
@@ -289,7 +339,7 @@ test('deduplicates concurrent refresh calls', async t => {
 	t.is(callCount, 6);
 });
 
-test('reused token-refresh wrapper deduplicates refresh across wrapped fetch functions', async t => {
+test('reused token-refresh wrapper deduplicates refresh across wrapped fetch functions for resolved origins', async t => {
 	let refreshCount = 0;
 	const {mockFetch} = createAuthorization401Fetch();
 	const refresh = withTokenRefresh({
@@ -309,13 +359,126 @@ test('reused token-refresh wrapper deduplicates refresh across wrapped fetch fun
 	})(mockFetch));
 
 	const [responseA, responseB] = await Promise.all([
-		fetchWithRefreshA('/api/a'),
-		fetchWithRefreshB('/api/b'),
+		fetchWithRefreshA('https://example.com/api/a'),
+		fetchWithRefreshB('https://example.com/api/b'),
 	]);
 
 	t.is(responseA.status, 200);
 	t.is(responseB.status, 200);
 	t.is(refreshCount, 1);
+});
+
+test('unresolved origins do not share refreshes across wrapped fetch functions', async t => {
+	let refreshCount = 0;
+	const refreshQueue = [];
+
+	const createWrappedFetch = expectedToken => async (url, options = {}) => {
+		const authorization = new Headers(options.headers).get('Authorization');
+
+		if (authorization === expectedToken) {
+			return new Response(null, {status: 200});
+		}
+
+		if (authorization?.startsWith('Bearer token-')) {
+			return new Response(null, {status: 401});
+		}
+
+		return new Response(null, {status: 401});
+	};
+
+	const refresh = withTokenRefresh({
+		async refreshToken() {
+			refreshCount++;
+			const token = `token-${refreshCount}`;
+			return new Promise(resolve => {
+				refreshQueue.push(() => {
+					resolve(token);
+				});
+			});
+		},
+	});
+	const fetchWithRefreshA = refresh(withHeaders({
+		Authorization: 'Bearer stale-token',
+	})(createWrappedFetch('Bearer token-1')));
+	const fetchWithRefreshB = refresh(withHeaders({
+		Authorization: 'Bearer stale-token',
+	})(createWrappedFetch('Bearer token-2')));
+
+	const requestA = fetchWithRefreshA('/api/users');
+	const requestB = fetchWithRefreshB('/api/users');
+
+	await new Promise(resolve => {
+		setTimeout(resolve, 0);
+	});
+	t.is(refreshQueue.length, 2);
+
+	for (const resolveRefresh of refreshQueue) {
+		resolveRefresh();
+	}
+
+	const [responseA, responseB] = await Promise.all([requestA, requestB]);
+
+	t.is(refreshCount, 2);
+	t.is(responseA.status, 200);
+	t.is(responseB.status, 200);
+});
+
+test('unresolved origins stay isolated across wrapper instances over the same root fetch', async t => {
+	let refreshCount = 0;
+	const refreshQueue = [];
+
+	const mockFetch = async (_url, options = {}) => {
+		const headers = new Headers(options.headers);
+		const tenant = headers.get('X-Tenant');
+		const authorization = headers.get('Authorization');
+
+		if (
+			(tenant === 'tenant-a' && authorization === 'Bearer token-1')
+			|| (tenant === 'tenant-b' && authorization === 'Bearer token-2')
+		) {
+			return new Response(null, {status: 200});
+		}
+
+		return new Response(null, {status: 401});
+	};
+
+	const refresh = withTokenRefresh({
+		async refreshToken() {
+			refreshCount++;
+			const token = `token-${refreshCount}`;
+			return new Promise(resolve => {
+				refreshQueue.push(() => {
+					resolve(token);
+				});
+			});
+		},
+	});
+	const fetchWithRefreshA = refresh(withHeaders({
+		Authorization: 'Bearer stale-token',
+		'X-Tenant': 'tenant-a',
+	})(mockFetch));
+	const fetchWithRefreshB = refresh(withHeaders({
+		Authorization: 'Bearer stale-token',
+		'X-Tenant': 'tenant-b',
+	})(mockFetch));
+
+	const requestA = fetchWithRefreshA('/api/users');
+	const requestB = fetchWithRefreshB('/api/users');
+
+	await new Promise(resolve => {
+		setTimeout(resolve, 0);
+	});
+	t.is(refreshQueue.length, 2);
+
+	for (const resolveRefresh of refreshQueue) {
+		resolveRefresh();
+	}
+
+	const [responseA, responseB] = await Promise.all([requestA, requestB]);
+
+	t.is(refreshCount, 2);
+	t.is(responseA.status, 200);
+	t.is(responseB.status, 200);
 });
 
 test('retries Request input and preserves its headers', async t => {
@@ -2148,7 +2311,7 @@ test('anonymous requests do not share refreshes with overlapping Request Authori
 	t.is(refreshCount, 2);
 });
 
-test('anonymous string and Request inputs share the same anonymous refresh', async t => {
+test('anonymous string and Request inputs refresh separately when only one origin is known', async t => {
 	let refreshCount = 0;
 	const retryAuthorizations = [];
 
@@ -2181,7 +2344,7 @@ test('anonymous string and Request inputs share the same anonymous refresh', asy
 
 	t.is(stringResponse.status, 200);
 	t.is(requestResponse.status, 200);
-	t.is(refreshCount, 1);
+	t.is(refreshCount, 2);
 	t.deepEqual(retryAuthorizations, ['Bearer anonymous-token-1', 'Bearer anonymous-token-1']);
 });
 
@@ -2836,7 +2999,7 @@ test('Request input shares refreshes by effective Authorization header through i
 	t.is(callCount, 6);
 });
 
-test('Request Authorization headers share refreshes with matching per-call Authorization overrides', async t => {
+test('Request Authorization headers refresh separately from matching per-call Authorization overrides when only one origin is known', async t => {
 	let refreshCount = 0;
 	let callCount = 0;
 
@@ -2875,7 +3038,7 @@ test('Request Authorization headers share refreshes with matching per-call Autho
 
 	t.is(requestResponse.status, 200);
 	t.is(optionsResponse.status, 200);
-	t.is(refreshCount, 1);
+	t.is(refreshCount, 2);
 	t.is(callCount, 4);
 });
 
@@ -3967,11 +4130,10 @@ test('Request with no custom headers only gets Authorization on retry', async t 
 			retryHeaders = new Headers(options.headers);
 		}
 
-		const status = callCount === 1 ? 401 : 200;
 		return {
-			ok: status === 200,
-			status,
-			statusText: status === 200 ? 'OK' : 'Unauthorized',
+			ok: callCount === 2,
+			status: callCount === 1 ? 401 : 200,
+			statusText: callCount === 1 ? 'Unauthorized' : 'OK',
 			url: typeof urlOrRequest === 'string' ? urlOrRequest : urlOrRequest.url,
 			headers: new Headers(options.headers),
 		};
@@ -3987,6 +4149,135 @@ test('Request with no custom headers only gets Authorization on retry', async t 
 	const response = await fetchWithRefresh(request);
 	t.is(response.status, 200);
 	t.is(retryHeaders.get('Authorization'), 'Bearer new-token');
+});
+
+test('different origins with the same Authorization header do not share a refresh', async t => {
+	let refreshCount = 0;
+
+	const mockFetch = async (_urlOrRequest, options = {}) => {
+		const authorization = new Headers(options.headers).get('Authorization');
+		return new Response(null, {status: authorization === 'Bearer new-token' ? 200 : 401});
+	};
+
+	const fetchWithRefresh = withTokenRefresh({
+		async refreshToken() {
+			refreshCount++;
+			await new Promise(resolve => {
+				setTimeout(resolve, 10);
+			});
+			return 'new-token';
+		},
+	})(mockFetch);
+
+	const [responseA, responseB] = await Promise.all([
+		fetchWithRefresh('https://api.example.com/a', {
+			headers: {Authorization: 'Bearer expired-token'},
+		}),
+		fetchWithRefresh('https://other.example.com/b', {
+			headers: {Authorization: 'Bearer expired-token'},
+		}),
+	]);
+
+	t.is(responseA.status, 200);
+	t.is(responseB.status, 200);
+	t.is(refreshCount, 2);
+});
+
+test('same origin with the same Authorization header shares a single refresh', async t => {
+	let refreshCount = 0;
+
+	const mockFetch = async (_urlOrRequest, options = {}) => {
+		const authorization = new Headers(options.headers).get('Authorization');
+		return new Response(null, {status: authorization === 'Bearer new-token' ? 200 : 401});
+	};
+
+	const fetchWithRefresh = withTokenRefresh({
+		async refreshToken() {
+			refreshCount++;
+			await new Promise(resolve => {
+				setTimeout(resolve, 10);
+			});
+			return 'new-token';
+		},
+	})(mockFetch);
+
+	const [responseA, responseB] = await Promise.all([
+		fetchWithRefresh('https://api.example.com/a', {
+			headers: {Authorization: 'Bearer expired-token'},
+		}),
+		fetchWithRefresh('https://api.example.com/b', {
+			headers: {Authorization: 'Bearer expired-token'},
+		}),
+	]);
+
+	t.is(responseA.status, 200);
+	t.is(responseB.status, 200);
+	t.is(refreshCount, 1);
+});
+
+test('withBaseUrl resolves relative URLs to the same origin for refresh deduplication', async t => {
+	let refreshCount = 0;
+
+	const mockFetch = async (_urlOrRequest, options = {}) => {
+		const authorization = new Headers(options.headers).get('Authorization');
+		return new Response(null, {status: authorization === 'Bearer new-token' ? 200 : 401});
+	};
+
+	const fetchWithRefresh = withTokenRefresh({
+		async refreshToken() {
+			refreshCount++;
+			await new Promise(resolve => {
+				setTimeout(resolve, 10);
+			});
+			return 'new-token';
+		},
+	})(withBaseUrl('https://api.example.com')(mockFetch));
+
+	const [responseA, responseB] = await Promise.all([
+		fetchWithRefresh('/users', {
+			headers: {Authorization: 'Bearer expired-token'},
+		}),
+		fetchWithRefresh('/posts', {
+			headers: {Authorization: 'Bearer expired-token'},
+		}),
+	]);
+
+	t.is(responseA.status, 200);
+	t.is(responseB.status, 200);
+	t.is(refreshCount, 1);
+});
+
+test.serial('browser relative URLs share refresh deduplication with same-origin absolute requests', async t => {
+	setMockLocation(t, 'https://example.com/app/');
+	let refreshCount = 0;
+
+	const mockFetch = async (_urlOrRequest, options = {}) => {
+		const authorization = new Headers(options.headers).get('Authorization');
+		return new Response(null, {status: authorization === 'Bearer new-token' ? 200 : 401});
+	};
+
+	const fetchWithRefresh = withTokenRefresh({
+		async refreshToken() {
+			refreshCount++;
+			await new Promise(resolve => {
+				setTimeout(resolve, 10);
+			});
+			return 'new-token';
+		},
+	})(mockFetch);
+
+	const [responseA, responseB] = await Promise.all([
+		fetchWithRefresh('/users', {
+			headers: {Authorization: 'Bearer expired-token'},
+		}),
+		fetchWithRefresh(new Request('https://example.com/posts'), {
+			headers: {Authorization: 'Bearer expired-token'},
+		}),
+	]);
+
+	t.is(responseA.status, 200);
+	t.is(responseB.status, 200);
+	t.is(refreshCount, 1);
 });
 
 test('rejects when signal is already aborted before the call', async t => {

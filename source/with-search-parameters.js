@@ -1,11 +1,5 @@
 import {copyFetchMetadata, resolveRequestUrlSymbol} from './utilities.js';
 
-/**
-Wraps a fetch function to include default search parameters on every request. Per-call parameters in the URL take priority over the defaults. String URLs and `URL` objects are modified. `Request` objects are passed through unchanged.
-
-@param {Record<string, string> | URLSearchParams | ReadonlyArray<readonly [string, string]>} defaultSearchParameters - Default search parameters to include on every request.
-@returns {(fetchFunction: typeof fetch) => typeof fetch}
-*/
 export function withSearchParameters(defaultSearchParameters) {
 	const defaults = new URLSearchParams(defaultSearchParameters);
 

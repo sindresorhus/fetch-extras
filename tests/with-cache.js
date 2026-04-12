@@ -49,6 +49,22 @@ const createAuthorizationEchoFetch = () => {
 	};
 };
 
+const createVaryResponseFetch = varyHeaderValue => {
+	let callCount = 0;
+
+	const mockFetch = async () => {
+		callCount++;
+		return Response.json({callCount}, {
+			headers: {
+				vary: varyHeaderValue,
+			},
+		});
+	};
+
+	Object.defineProperty(mockFetch, 'callCount', {get: () => callCount});
+	return mockFetch;
+};
+
 test('returns cached response for repeated GET requests', async t => {
 	const mockFetch = createMockFetch();
 	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
@@ -218,6 +234,74 @@ test('GET requests preserve empty resolved async headers when checking cacheabil
 		callCount: 2,
 		authorization: 'Bearer secret',
 	});
+});
+
+test('responses with `Vary: *` are not cached', async t => {
+	const mockFetch = createVaryResponseFetch('*');
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
+
+	const firstResponse = await cachedFetch('https://example.com/api');
+	const secondResponse = await cachedFetch('https://example.com/api');
+
+	t.deepEqual(await firstResponse.json(), {callCount: 1});
+	t.deepEqual(await secondResponse.json(), {callCount: 2});
+	t.is(mockFetch.callCount, 2);
+});
+
+test('responses with `Vary` header names are not cached', async t => {
+	const mockFetch = createVaryResponseFetch('accept-language');
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
+
+	const firstResponse = await cachedFetch('https://example.com/api');
+	const secondResponse = await cachedFetch('https://example.com/api');
+
+	t.deepEqual(await firstResponse.json(), {callCount: 1});
+	t.deepEqual(await secondResponse.json(), {callCount: 2});
+	t.is(mockFetch.callCount, 2);
+});
+
+test('responses with `Cache-Control: no-store` are not cached', async t => {
+	let callCount = 0;
+
+	const mockFetch = async () => {
+		callCount++;
+		return Response.json({callCount}, {
+			headers: {
+				'cache-control': 'no-store',
+			},
+		});
+	};
+
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
+
+	const firstResponse = await cachedFetch('https://example.com/api');
+	const secondResponse = await cachedFetch('https://example.com/api');
+
+	t.deepEqual(await firstResponse.json(), {callCount: 1});
+	t.deepEqual(await secondResponse.json(), {callCount: 2});
+	t.is(callCount, 2);
+});
+
+test('responses with `Cache-Control: no-cache` are not cached', async t => {
+	let callCount = 0;
+
+	const mockFetch = async () => {
+		callCount++;
+		return Response.json({callCount}, {
+			headers: {
+				'cache-control': 'max-age=60, no-cache',
+			},
+		});
+	};
+
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
+
+	const firstResponse = await cachedFetch('https://example.com/api');
+	const secondResponse = await cachedFetch('https://example.com/api');
+
+	t.deepEqual(await firstResponse.json(), {callCount: 1});
+	t.deepEqual(await secondResponse.json(), {callCount: 2});
+	t.is(callCount, 2);
 });
 
 test('GET requests with sync resolveRequestHeadersSymbol stay cacheable when it resolves to empty headers', async t => {
@@ -448,6 +532,31 @@ test('GET requests with Cookie headers are not cached', async t => {
 	});
 });
 
+test('responses with Set-Cookie headers are not cached', async t => {
+	let callCount = 0;
+
+	const mockFetch = async () => {
+		callCount++;
+		return new Response(JSON.stringify({callCount}), {
+			headers: {
+				'content-type': 'application/json',
+				'set-cookie': `session=${callCount}`,
+			},
+		});
+	};
+
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
+
+	const firstResponse = await cachedFetch('https://example.com/api');
+	const secondResponse = await cachedFetch('https://example.com/api');
+
+	t.is(callCount, 2);
+	t.deepEqual(await firstResponse.json(), {callCount: 1});
+	t.deepEqual(await secondResponse.json(), {callCount: 2});
+	t.deepEqual(firstResponse.headers.getSetCookie(), ['session=1']);
+	t.deepEqual(secondResponse.headers.getSetCookie(), ['session=2']);
+});
+
 test('GET requests with custom credential headers are not cached', async t => {
 	let callCount = 0;
 
@@ -498,6 +607,33 @@ test('GET requests with credentials: include are not cached', async t => {
 		callCount: 2,
 		credentials: '__undefined__',
 	});
+});
+
+test.serial('plain GET requests stay cacheable even when globalThis.location is defined', async t => {
+	const originalLocation = globalThis.location;
+	Object.defineProperty(globalThis, 'location', {
+		value: new URL('https://example.com/app/'),
+		configurable: true,
+	});
+	t.teardown(() => {
+		if (originalLocation === undefined) {
+			delete globalThis.location;
+			return;
+		}
+
+		Object.defineProperty(globalThis, 'location', {
+			value: originalLocation,
+			configurable: true,
+		});
+	});
+
+	const cachedFetch = withCache({ttl: 60_000})(createMockFetch());
+
+	const firstResponse = await cachedFetch('/api');
+	const secondResponse = await cachedFetch('/api');
+
+	t.deepEqual(await firstResponse.json(), {callCount: 1});
+	t.deepEqual(await secondResponse.json(), {callCount: 1});
 });
 
 test('GET requests with integrity metadata are not cached', async t => {
@@ -2228,6 +2364,33 @@ test('cache: no-store bypasses and does not replace a cached GET', async t => {
 	t.is(mockFetch.callCount, 2);
 });
 
+test('cache: no-store keeps the existing cached GET when the bypassed response is `Cache-Control: no-store`', async t => {
+	let callCount = 0;
+	const mockFetch = async () => {
+		callCount++;
+		return Response.json({callCount}, callCount === 2
+			? {
+				headers: {
+					'cache-control': 'no-store',
+				},
+			}
+			: undefined,
+		);
+	};
+
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
+
+	const cachedResponse = await cachedFetch('https://example.com/api');
+	t.deepEqual(await cachedResponse.json(), {callCount: 1});
+
+	const bypassedResponse = await cachedFetch('https://example.com/api', {cache: 'no-store'});
+	t.deepEqual(await bypassedResponse.json(), {callCount: 2});
+
+	const cachedAgainResponse = await cachedFetch('https://example.com/api');
+	t.deepEqual(await cachedAgainResponse.json(), {callCount: 1});
+	t.is(callCount, 2);
+});
+
 test('Request cache: no-store bypasses and does not replace a cached GET', async t => {
 	const mockFetch = createMockFetch();
 	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
@@ -2275,6 +2438,118 @@ test('cache: no-cache bypasses and refreshes a cached GET', async t => {
 	const cachedAgainResponse = await cachedFetch('https://example.com/api');
 	t.deepEqual(await cachedAgainResponse.json(), {callCount: 2});
 	t.is(mockFetch.callCount, 2);
+});
+
+test('cache: reload removes a stale cached GET when the refreshed response is `Cache-Control: no-store`', async t => {
+	let callCount = 0;
+	const mockFetch = async () => {
+		callCount++;
+		return Response.json({callCount}, callCount === 2
+			? {
+				headers: {
+					'cache-control': 'no-store',
+				},
+			}
+			: undefined,
+		);
+	};
+
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
+
+	const cachedResponse = await cachedFetch('https://example.com/api');
+	t.deepEqual(await cachedResponse.json(), {callCount: 1});
+
+	const reloadedResponse = await cachedFetch('https://example.com/api', {cache: 'reload'});
+	t.deepEqual(await reloadedResponse.json(), {callCount: 2});
+
+	const uncachedFollowUpResponse = await cachedFetch('https://example.com/api');
+	t.deepEqual(await uncachedFollowUpResponse.json(), {callCount: 3});
+	t.is(callCount, 3);
+});
+
+test.serial('older expired GETs do not repopulate the cache after an uncacheable reload', async t => {
+	let resolveStaleGet;
+	const staleGetPromise = new Promise(resolve => {
+		resolveStaleGet = resolve;
+	});
+	let currentTime = 1000;
+	const originalPerformanceNow = performance.now;
+	performance.now = () => currentTime;
+	let getCallCount = 0;
+
+	const mockFetch = async (_urlOrRequest, options = {}) => {
+		if (options.cache === 'reload') {
+			return new Response('uncacheable', {
+				headers: {
+					'cache-control': 'no-store',
+				},
+			});
+		}
+
+		getCallCount++;
+
+		if (getCallCount === 1) {
+			return new Response('initial');
+		}
+
+		if (getCallCount === 2) {
+			await staleGetPromise;
+			return new Response('stale');
+		}
+
+		return new Response('fresh');
+	};
+
+	try {
+		const cachedFetch = withCache({ttl: 5000})(mockFetch);
+
+		const initialResponse = await cachedFetch('https://example.com/api');
+		t.is(await initialResponse.text(), 'initial');
+
+		currentTime = 7000;
+		const staleResponsePromise = cachedFetch('https://example.com/api');
+		await Promise.resolve();
+
+		const reloadedResponse = await cachedFetch('https://example.com/api', {cache: 'reload'});
+		t.is(await reloadedResponse.text(), 'uncacheable');
+
+		resolveStaleGet();
+		const staleResponse = await staleResponsePromise;
+		t.is(await staleResponse.text(), 'stale');
+
+		const freshResponse = await cachedFetch('https://example.com/api');
+		t.is(await freshResponse.text(), 'fresh');
+		t.is(getCallCount, 3);
+	} finally {
+		performance.now = originalPerformanceNow;
+	}
+});
+
+test('cache: no-cache removes a stale cached GET when the refreshed response is `Cache-Control: no-cache`', async t => {
+	let callCount = 0;
+	const mockFetch = async () => {
+		callCount++;
+		return Response.json({callCount}, callCount === 2
+			? {
+				headers: {
+					'cache-control': 'max-age=60, no-cache',
+				},
+			}
+			: undefined,
+		);
+	};
+
+	const cachedFetch = withCache({ttl: 60_000})(mockFetch);
+
+	const cachedResponse = await cachedFetch('https://example.com/api');
+	t.deepEqual(await cachedResponse.json(), {callCount: 1});
+
+	const refreshedResponse = await cachedFetch('https://example.com/api', {cache: 'no-cache'});
+	t.deepEqual(await refreshedResponse.json(), {callCount: 2});
+
+	const uncachedFollowUpResponse = await cachedFetch('https://example.com/api');
+	t.deepEqual(await uncachedFollowUpResponse.json(), {callCount: 3});
+	t.is(callCount, 3);
 });
 
 test.serial('cache: force-cache returns stale cached entry after TTL expiry', async t => {

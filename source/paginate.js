@@ -8,6 +8,7 @@ import {
 	resolveRequestBodyOptions,
 	resolveRequestHeaders,
 	resolveRequestHeadersSymbol,
+	resolveRequestUrl,
 } from './utilities.js';
 
 const defaultPaginationOptions = {
@@ -210,7 +211,7 @@ const currentSignal = (requestTemplate, fetchOptions) => fetchOptions.signal ?? 
 const getHeaderNames = headers => [...new Headers(headers).keys()];
 
 /*
-Boundary: following a Link header is not an HTTP redirect. We are constructing a new request for a new URL, often in environments like Node where callers can set arbitrary credential headers. So when pagination crosses origins, only the carried request header state is cleared. Then inner wrappers such as withHeaders() run again for the next page.
+Boundary: following a Link header is not an HTTP redirect. We are constructing a new request for a new URL, often in environments like Node where callers can set arbitrary credential headers. Research note: most general HTTP clients leave pagination policy to user code, while Got strips inherited standard credential headers on cross-origin pagination and preserves explicit replacements. Since fetch-extras does not have a pagination-specific redirect hook for app-defined auth policies, we use the smaller contract here: clear carried request header state and block all automatic default headers from later cross-origin pages. Callers can still opt back in explicitly through `pagination.paginate`.
 */
 const clearCrossOriginHeaderState = (requestTemplate, fetchOptions) => {
 	const nextFetchOptions = 'headers' in fetchOptions
@@ -219,13 +220,14 @@ const clearCrossOriginHeaderState = (requestTemplate, fetchOptions) => {
 			headers: new Headers(),
 		}
 		: {...fetchOptions};
+	const blockedFetchOptions = markToBlockDefaultHeaders(nextFetchOptions, ['*']);
 
 	return {
 		requestTemplate: requestTemplate && new Request(requestTemplate.url, {
 			...requestSnapshot(requestTemplate),
 			headers: new Headers(),
 		}),
-		currentFetchOptions: hasExplicitBody(fetchOptions) ? normalizeBodylessFetchOptions(nextFetchOptions) : nextFetchOptions,
+		currentFetchOptions: hasExplicitBody(fetchOptions) ? normalizeBodylessFetchOptions(blockedFetchOptions) : blockedFetchOptions,
 		inheritedStateOrigin: undefined,
 	};
 };
@@ -233,28 +235,6 @@ const clearCrossOriginHeaderState = (requestTemplate, fetchOptions) => {
 const hasExplicitHeaderState = fetchOptions => hasExplicitBody(fetchOptions) || ('headers' in fetchOptions && getHeaderNames(fetchOptions.headers).length > 0);
 const shouldClearInheritedBody = (fetchOptions, nextPageOptions) => !methodCanHaveBody(fetchOptions.method) && !Object.hasOwn(nextPageOptions, 'body') && Object.hasOwn(fetchOptions, 'body');
 
-/**
-Paginate through API responses using async iteration.
-
-By default, it automatically follows RFC 5988 Link headers with rel="next".
-
-Note: When pagination crosses to a different origin, inherited request headers are cleared before the next request is built. If you intentionally need headers on the new origin, return them explicitly from `pagination.paginate`.
-
-@param {RequestInfo | URL} input - The URL to fetch.
-@param {RequestInit & {pagination?: PaginationOptions, fetchFunction?: Function}} options - Fetch options plus pagination options.
-@yields {*} Items from each page.
-@returns {AsyncIterableIterator} An async iterator that yields items from each page.
-
-@example
-```
-import {paginate} from 'fetch-extras';
-
-// Basic usage with Link headers
-for await (const item of paginate('https://api.example.com/items')) {
-	console.log(item);
-}
-```
-*/
 // eslint-disable-next-line complexity
 export async function * paginate(input, options = {}) {
 	const {pagination = {}, fetchFunction = fetch, ...fetchOptions} = options;
@@ -346,7 +326,7 @@ export async function * paginate(input, options = {}) {
 	}
 
 	let currentUrl = requestTemplate ? new URL(requestTemplate.url) : input;
-	let inheritedStateOrigin = absoluteUrl(requestTemplate ? requestTemplate.url : input);
+	let inheritedStateOrigin = absoluteUrl(resolveRequestUrl(fetchFunction, requestTemplate ?? input));
 
 	while (numberOfRequests < paginationOptions.requestLimit && countLimit > 0) {
 		if (numberOfRequests !== 0 && paginationOptions.backoff > 0) {

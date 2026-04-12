@@ -1,7 +1,11 @@
 /**
 Wraps a fetch function to resolve relative URLs against a base URL. Useful for API clients with a consistent base URL.
 
-Only string-based relative URLs are resolved against the base URL. Absolute URLs and URL objects are passed through unchanged. Protocol-relative inputs like `//cdn.example.com/file.js` are rejected to avoid escaping the configured origin. Relative paths are resolved against the base URL's pathname, while query-only and fragment-only inputs keep normal URL semantics.
+Only string-based relative URLs are resolved against the base URL. Absolute URLs and URL objects are passed through unchanged. Protocol-relative inputs like `//cdn.example.com/file.js` are rejected to avoid ambiguity about escaping the configured origin. Relative paths are resolved against the base URL's pathname, while query-only and fragment-only inputs keep normal URL semantics.
+
+`withBaseUrl()` only resolves URLs. Absolute inputs still go through other wrappers.
+
+`withBaseUrl()` is intended for normal relative paths and explicit absolute URLs. Ambiguous `http:` / `https:` shorthand string inputs without `//` are intentionally unsupported.
 
 Can be combined with other `with*` functions.
 
@@ -26,6 +30,15 @@ const fetch2 = withBaseUrl('https://api.example.com/v1/')(fetch);
 await fetch1('users'); // https://api.example.com/v1/users
 await fetch2('users'); // https://api.example.com/v1/users
 await fetch1('?page=2'); // https://api.example.com/v1?page=2
+```
+
+@example
+```
+const fetchWithBaseUrl = withBaseUrl('https://api.example.com')(fetch);
+
+await fetchWithBaseUrl('https://other.example.com/users');
+await fetchWithBaseUrl(new URL('https://other.example.com/users'));
+await fetchWithBaseUrl(new Request('https://other.example.com/users'));
 ```
 
 @example

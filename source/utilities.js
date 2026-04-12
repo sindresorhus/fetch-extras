@@ -9,6 +9,7 @@ export const waitForConcurrencySlotSymbol = Symbol('waitForConcurrencySlot');
 export const defersConcurrencySlotSymbol = Symbol('defersConcurrencySlot');
 export const notifyFetchStartSymbol = Symbol('notifyFetchStart');
 export const defersFetchStartSymbol = Symbol('defersFetchStart');
+const rootFetchFunctions = new WeakMap();
 export const requestBodyHeaderNames = [
 	'content-encoding',
 	'content-language',
@@ -183,13 +184,6 @@ export function trackByteProgress(stream, totalBytes, onProgress) {
 	});
 }
 
-/**
-Creates a promise that resolves after the specified delay.
-
-@param {number} milliseconds - The delay duration in milliseconds.
-@param {{signal?: AbortSignal}} [options] - Options for the delay.
-@returns {Promise<void>} A promise that resolves after the delay.
-*/
 export function delay(milliseconds, {signal} = {}) {
 	return new Promise((resolve, reject) => {
 		signal?.throwIfAborted();
@@ -298,6 +292,10 @@ export function resolveRequestUrl(fetchFunction, urlOrRequest) {
 	return url.split('#', 1)[0];
 }
 
+export function getRootFetchFunction(fetchFunction) {
+	return rootFetchFunctions.get(fetchFunction) ?? fetchFunction;
+}
+
 export function deleteHeaders(headers, headerNames) {
 	for (const headerName of headerNames) {
 		headers.delete(headerName);
@@ -372,14 +370,6 @@ export function withResolvedRequestHeaders(options, headers) {
 	};
 }
 
-/**
-Resolves effective request headers and, when needed, marks them as already resolved for downstream wrappers.
-
-@param {typeof fetch} fetchFunction - The fetch function whose header resolver metadata should be honored.
-@param {RequestInfo | URL} urlOrRequest - The current request input.
-@param {RequestInit} [options] - Request options associated with the input.
-@returns {Promise<Headers>} The resolved headers.
-*/
 export async function getResolvedRequestHeaders(fetchFunction, urlOrRequest, options = {}) {
 	return new Headers(await resolveRequestHeaders(fetchFunction, urlOrRequest, options));
 }
@@ -478,6 +468,8 @@ export function copyFetchMetadata(targetFetch, sourceFetch) {
 	if (targetFetch[defersFetchStartSymbol] === undefined && sourceFetch[defersFetchStartSymbol] !== undefined) {
 		targetFetch[defersFetchStartSymbol] = sourceFetch[defersFetchStartSymbol];
 	}
+
+	rootFetchFunctions.set(targetFetch, getRootFetchFunction(sourceFetch));
 
 	return targetFetch;
 }

@@ -7,18 +7,40 @@ import {
 	resolveRequestBodyOptions,
 	resolveRequestHeadersSymbol,
 	resolveRequestHeaders,
+	resolveRequestUrl,
 	withResolvedRequestHeaders,
 } from './utilities.js';
 
-/**
-Wraps a fetch function to automatically refresh the token and retry the request on a `401 Unauthorized` response.
+function withSignal(options, signal) {
+	return signal ? {...options, signal} : options;
+}
 
-Concurrent 401 responses that overlap while a refresh is still pending share a single `refreshToken` call when they have the same effective `Authorization` header, preventing token invalidation races across requests for the same auth context. Requests with different effective `Authorization` headers refresh separately.
+function isAsyncIterable(value) {
+	return value !== undefined
+		&& !(value instanceof ReadableStream)
+		&& typeof value[Symbol.asyncIterator] === 'function';
+}
 
-@param {object} options
-@param {() => string | Promise<string>} options.refreshToken - Called when a 401 response is received. Should return the new token string.
-@returns {(fetchFunction: typeof fetch) => typeof fetch} A function that accepts a fetch function and returns a wrapped fetch function that retries once with a refreshed `Authorization: Bearer <token>` header on 401 responses.
-*/
+function isBearerAuthorizationHeader(authorization) {
+	return /^bearer[\t ]+/i.test(authorization ?? '');
+}
+
+function shouldRetryWithBearerToken(authorization) {
+	return authorization === null || isBearerAuthorizationHeader(authorization);
+}
+
+function getRequestOrigin(requestUrl) {
+	try {
+		return new URL(requestUrl).origin;
+	} catch {
+		try {
+			return new URL(requestUrl, globalThis.location?.href).origin;
+		} catch {
+			return undefined;
+		}
+	}
+}
+
 export function withTokenRefresh({refreshToken}) {
 	/*
 	Boundary: this wrapper only deduplicates overlapping refreshes.
@@ -27,12 +49,30 @@ export function withTokenRefresh({refreshToken}) {
 	This smaller contract is intentional because it keeps the state model predictable and avoids stale-token reuse.
 	*/
 	const refreshEntries = new Map();
+	const unresolvedFetchFunctionKeys = new WeakMap();
+	let unresolvedFetchFunctionKeyCount = 0;
+
+	const getUnresolvedFetchFunctionKey = fetchFunction => {
+		let fetchFunctionKey = unresolvedFetchFunctionKeys.get(fetchFunction);
+
+		if (fetchFunctionKey === undefined) {
+			unresolvedFetchFunctionKeyCount++;
+			fetchFunctionKey = `unresolved:${unresolvedFetchFunctionKeyCount}`;
+			unresolvedFetchFunctionKeys.set(fetchFunction, fetchFunctionKey);
+		}
+
+		return fetchFunctionKey;
+	};
+
+	const getRefreshKey = (fetchFunction, urlOrRequest, authorization) => {
+		const requestUrl = resolveRequestUrl(fetchFunction, urlOrRequest);
+		const requestOrigin = getRequestOrigin(requestUrl);
+
+		return `${requestOrigin ?? getUnresolvedFetchFunctionKey(fetchFunction)}\n${authorization ?? ''}`;
+	};
 
 	return fetchFunction => {
 		const getAbortReason = signal => signal?.reason ?? new DOMException('This operation was aborted', 'AbortError');
-
-		const withSignal = (options, signal) => signal ? {...options, signal} : options;
-		const isAsyncIterable = value => value !== undefined && !(value instanceof ReadableStream) && typeof value[Symbol.asyncIterator] === 'function';
 		const discardHiddenBodies = async (response, retryBody) => {
 			await discardBody(response?.body);
 			await discardBody(retryBody);
@@ -43,13 +83,13 @@ export function withTokenRefresh({refreshToken}) {
 			return response;
 		};
 
-		const clearRefreshEntry = (authorization, refreshEntry) => {
-			if (refreshEntries.get(authorization) === refreshEntry) {
-				refreshEntries.delete(authorization);
+		const clearRefreshEntry = (refreshKey, refreshEntry) => {
+			if (refreshEntries.get(refreshKey) === refreshEntry) {
+				refreshEntries.delete(refreshKey);
 			}
 		};
 
-		const createRefreshEntry = authorization => {
+		const createRefreshEntry = refreshKey => {
 			const refreshEntry = {
 				waiterCount: 0,
 			};
@@ -58,28 +98,29 @@ export function withTokenRefresh({refreshToken}) {
 				try {
 					return await refreshToken();
 				} finally {
-					clearRefreshEntry(authorization, refreshEntry);
+					clearRefreshEntry(refreshKey, refreshEntry);
 				}
 			})();
 
-			refreshEntries.set(authorization, refreshEntry);
+			refreshEntries.set(refreshKey, refreshEntry);
 			return refreshEntry;
 		};
 
-		const getToken = async (authorization, signal) => {
+		const getToken = async (refreshKey, signal) => {
 			if (signal?.aborted) {
 				throw getAbortReason(signal);
 			}
 
-			let refreshEntry = refreshEntries.get(authorization);
+			let refreshEntry = refreshEntries.get(refreshKey);
 
 			if (!refreshEntry || refreshEntry.waiterCount === 0) {
 				/*
-				Algorithm: one pending refresh promise per effective Authorization value.
+				Algorithm: one pending refresh promise per resolved request-origin and effective Authorization combination.
 				Requests that hit 401 while this promise is pending reuse it.
-				If every waiter gives up on a still-pending refresh, the next same-auth request starts a fresh attempt instead of inheriting an abandoned hung refresh.
+				Requests whose origin cannot be resolved stay conservative and only share within the same wrapped fetch function.
+				If every waiter gives up on a still-pending refresh, the next same-context request starts a fresh attempt instead of inheriting an abandoned hung refresh.
 				*/
-				refreshEntry = createRefreshEntry(authorization);
+				refreshEntry = createRefreshEntry(refreshKey);
 			}
 
 			refreshEntry.waiterCount++;
@@ -173,6 +214,10 @@ export function withTokenRefresh({refreshToken}) {
 				return returnResponse(response, retryBody);
 			}
 
+			if (!shouldRetryWithBearerToken(authorization)) {
+				return returnResponse(response, retryBody);
+			}
+
 			// Boundary: bare Request bodies are not retried because cloning every Request up front would penalize successful uploads too.
 			if (
 				(request?.body && options.body === undefined)
@@ -184,7 +229,8 @@ export function withTokenRefresh({refreshToken}) {
 			let token;
 
 			try {
-				token = await getToken(authorization, signal);
+				const refreshKey = getRefreshKey(fetchFunction, urlOrRequest, authorization);
+				token = await getToken(refreshKey, signal);
 			} catch (error) {
 				// Refresh failures fall back to the original 401, but abort-driven failures must still reject.
 				if (signal?.aborted) {

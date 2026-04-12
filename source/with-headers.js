@@ -11,17 +11,6 @@ import {
 	waitForAbortable,
 } from './utilities.js';
 
-/**
-Returns a wrapped fetch function that includes default headers on every request. Per-call headers take priority over the defaults, so you can always override a default on a specific request.
-
-Can be combined with other `with*` functions.
-
-@param {HeadersInit | (() => HeadersInit | Promise<HeadersInit>)} defaultHeaders - Default headers to include on every request. Accepts a plain object, a `Headers` instance, an array of `[name, value]` tuples, or a function that returns any of these (sync or async). When a function is given, it is called on every request, which is useful for headers that need to be resolved at request time (for example, reading an auth token from storage).
-@returns {(fetchFunction: typeof fetch) => typeof fetch}
-
-The header function does not receive the request URL or options. If you need headers that vary per request, use `withHooks` with a `beforeRequest` hook instead.
-Function-based defaults are request-scoped, not sequence-scoped. Each new wrapped fetch call resolves them again. Wrappers such as `withRetry()` and `paginate()` call into `withHeaders()` separately for each attempt or page, so the header function can run again for each one.
-*/
 export function withHeaders(defaultHeaders) {
 	const isFunction = typeof defaultHeaders === 'function';
 	const staticDefaultHeaders = isFunction ? undefined : new Headers(defaultHeaders);
@@ -29,7 +18,6 @@ export function withHeaders(defaultHeaders) {
 
 	return fetchFunction => {
 		const getMergedHeaders = (urlOrRequest, resolvedDefaults, options = {}) => {
-			const merged = new Headers(resolvedDefaults);
 			const requestHeaders = urlOrRequest instanceof Request ? new Headers(urlOrRequest.headers) : undefined;
 			const callHeaders = options.headers ? new Headers(options.headers) : undefined;
 			const blockedDefaultHeaderNames = new Set([
@@ -37,12 +25,15 @@ export function withHeaders(defaultHeaders) {
 				...(options[blockedDefaultHeaderNamesSymbol] ?? []),
 				...(options.headers?.[blockedDefaultHeaderNamesSymbol] ?? []),
 			]);
+			const hasBlockedAllDefaultHeaders = blockedDefaultHeaderNames.has('*');
+			const merged = hasBlockedAllDefaultHeaders ? new Headers() : new Headers(resolvedDefaults);
 
 			deleteHeaders(merged, blockedDefaultHeaderNames);
 			setHeaders(merged, requestHeaders);
 			setHeaders(merged, callHeaders);
 
 			return {
+				hasBlockedAllDefaultHeaders,
 				merged,
 				requestHeaders,
 				callHeaders,
@@ -67,6 +58,7 @@ export function withHeaders(defaultHeaders) {
 			}
 
 			const {
+				hasBlockedAllDefaultHeaders,
 				resolvedDefaults,
 				merged,
 				requestHeaders,
@@ -79,7 +71,7 @@ export function withHeaders(defaultHeaders) {
 				&& !blockedRequestBodyHeaderNames.some(headerName => blockedDefaultHeaderNames.has(headerName));
 
 			if (shouldTreatRequestBodyHeadersAsInherited) {
-				const resolvedDefaultHeaders = new Headers(resolvedDefaults);
+				const resolvedDefaultHeaders = hasBlockedAllDefaultHeaders ? new Headers() : new Headers(resolvedDefaults);
 				const inheritedHeaderNames = blockedRequestBodyHeaderNames.filter(headerName =>
 					requestHeaders.has(headerName)
 					&& !callHeaders?.has(headerName)

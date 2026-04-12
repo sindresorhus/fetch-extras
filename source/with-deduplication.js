@@ -1,4 +1,12 @@
-import {copyFetchMetadata, resolveRequestUrl, timeoutDurationSymbol} from './utilities.js';
+import {
+	copyFetchMetadata,
+	getResolvedRequestHeaders,
+	hasHeaders,
+	resolveRequestHeadersSymbol,
+	resolveRequestUrl,
+	timeoutDurationSymbol,
+	withResolvedRequestHeaders,
+} from './utilities.js';
 
 function enqueueWaiter(entry) {
 	return new Promise((resolve, reject) => {
@@ -36,16 +44,32 @@ function shouldDeduplicate(fetchFunction, urlOrRequest, options) {
 	return Object.keys(options).length === 0;
 }
 
+async function getFetchOptionsWithResolvedHeaders(fetchFunction, urlOrRequest, options) {
+	const resolvedHeaders = await getResolvedRequestHeaders(fetchFunction, urlOrRequest, options);
+
+	return withResolvedRequestHeaders(options, resolvedHeaders);
+}
+
 export function withDeduplication() {
 	return fetchFunction => {
 		// In-flight deduplication is per wrapped fetch function, not per curried wrapper factory.
 		const pending = new Map();
 
 		const fetchWithDeduplication = async function (urlOrRequest, options) {
-			const requestOptions = options ?? {};
+			let requestOptions = options ?? {};
 
 			if (!shouldDeduplicate(fetchFunction, urlOrRequest, requestOptions)) {
 				return fetchFunction(urlOrRequest, options);
+			}
+
+			if (fetchFunction[resolveRequestHeadersSymbol] !== undefined) {
+				const requestOptionsWithResolvedHeaders = await getFetchOptionsWithResolvedHeaders(fetchFunction, urlOrRequest, requestOptions);
+
+				if (hasHeaders(requestOptionsWithResolvedHeaders.headers)) {
+					return fetchFunction(urlOrRequest, requestOptionsWithResolvedHeaders);
+				}
+
+				requestOptions = requestOptionsWithResolvedHeaders;
 			}
 
 			const key = resolveDeduplicationKey(fetchFunction, urlOrRequest);

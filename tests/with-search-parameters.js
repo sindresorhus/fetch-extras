@@ -246,7 +246,7 @@ test('preserves resolved absolute URL metadata for outer wrappers in pipeline', 
 
 	const [firstResponse, secondResponse] = await Promise.all([
 		apiFetch('/users'),
-		apiFetch('https://api.example.com/users?apiKey=abc'),
+		apiFetch('/users?apiKey=abc'),
 	]);
 
 	t.is(callCount, 1);

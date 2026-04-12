@@ -80,11 +80,6 @@ function shouldJsonifyBody(body) {
 	return isPlainObject(body) || Array.isArray(body);
 }
 
-/**
-Returns a wrapped fetch function that automatically stringifies plain-object and array bodies as JSON and sets the `Content-Type: application/json` header.
-
-@returns {(fetchFunction: typeof fetch) => typeof fetch} A function that accepts a fetch function and returns a wrapped fetch function that auto-serializes JSON bodies.
-*/
 export function withJsonBody() {
 	return fetchFunction => {
 		const fetchWithJsonBody = async (urlOrRequest, options = {}) => {

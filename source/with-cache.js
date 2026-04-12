@@ -147,6 +147,33 @@ function getCachedResponse({entry, cacheMode, currentTime, isRangedRequest}) {
 	}
 }
 
+function hasSetCookieHeader(response) {
+	return response.headers.getSetCookie?.().length > 0 || response.headers.has('set-cookie');
+}
+
+function hasVaryHeader(response) {
+	return response.headers.has('vary');
+}
+
+function hasResponseCacheControlDirective(response, directive) {
+	const cacheControl = response.headers.get('cache-control');
+
+	if (!cacheControl) {
+		return false;
+	}
+
+	return cacheControl
+		.split(',')
+		.some(value => value.trim().split('=', 1)[0].toLowerCase() === directive);
+}
+
+function isUncacheableResponse(response) {
+	return hasVaryHeader(response)
+		|| hasResponseCacheControlDirective(response, 'no-cache')
+		|| hasResponseCacheControlDirective(response, 'no-store')
+		|| hasSetCookieHeader(response);
+}
+
 export function withCache({ttl}) {
 	if (typeof ttl !== 'number' || ttl <= 0 || !Number.isFinite(ttl)) {
 		throw new TypeError('`ttl` must be a positive finite number.');
@@ -207,6 +234,11 @@ export function withCache({ttl}) {
 			} = await getGetRequestContext(fetchFunction, urlOrRequest, options, requestContext);
 			const retainStaleEntry = cacheMode === 'force-cache' || cacheMode === 'only-if-cached';
 			const currentTime = evictExpiredEntries(cache, state, retainStaleEntry ? url : undefined);
+			/*
+			Cacheability stays tied to explicit request state only.
+			Ambient runtime state like `globalThis.location` is not a reliable signal for whether credentials will be attached, so it must not change caching by itself.
+			If a caller needs cookie-aware caching, that needs an explicit request signal or a dedicated wrapper contract.
+			*/
 			const isCacheableRequest = !isRangedRequest && !hasRequestHeaders && !hasNonDefaultRequestState;
 
 			signal?.throwIfAborted();
@@ -228,15 +260,31 @@ export function withCache({ttl}) {
 				return new Response(undefined, {status: 504, statusText: 'Gateway Timeout'});
 			}
 
-			return trackPending(resources, url, 'pendingGetCount', async () => {
+			return trackPending(resources, url, 'pendingGetCount', async urlState => {
 				const response = await fetchFunction(urlOrRequest, fetchOptionsWithHeaders);
 				const isPartialResponse = response.status === 206;
+				const shouldInvalidateCachedResponse = response.ok
+					&& isCacheableRequest
+					&& !isPartialResponse
+					&& isUncacheableResponse(response)
+					&& cacheMode !== 'only-if-cached'
+					&& cacheMode !== 'no-store'
+					&& generation === getGeneration(cache, state, url);
 
-				// Only cache successful responses.
+				if (shouldInvalidateCachedResponse) {
+					cache.delete(url);
+					urlState.generation = generation + 1;
+				}
+
+				/*
+				URL-only memoization cannot safely replay responses whose representation varies on request headers.
+				Those responses need a real HTTP cache key, so this wrapper treats any `Vary` response as uncacheable.
+				*/
 				if (
 					response.ok
 					&& isCacheableRequest
 					&& !isPartialResponse
+					&& !isUncacheableResponse(response)
 					&& cacheMode !== 'no-store'
 					&& generation === getGeneration(cache, state, url)
 				) {

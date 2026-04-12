@@ -1,6 +1,7 @@
 import test from 'ava';
 import {
 	paginate,
+	withBaseUrl,
 	withHeaders,
 	withHooks,
 	withJsonBody,
@@ -1195,7 +1196,7 @@ test.serial('paginate - preserves explicit next-page headers while dropping inhe
 	]);
 });
 
-test.serial('paginate - reapplies withHeaders Authorization defaults on cross-origin next pages', async t => {
+test.serial('paginate - blocks withHeaders Authorization defaults on cross-origin next pages', async t => {
 	const {seenRequests, fetchFunction} = createRecordedRequestFetch({
 		nextLink: `<${crossOriginNextUrl}>; rel="next"`,
 	});
@@ -1215,12 +1216,12 @@ test.serial('paginate - reapplies withHeaders Authorization defaults on cross-or
 		},
 		{
 			url: 'https://evil.example/?page=2',
-			authorization: 'Bearer secret',
+			authorization: null,
 		},
 	]);
 });
 
-test.serial('paginate - reapplies async withHeaders Authorization defaults on cross-origin next pages', async t => {
+test.serial('paginate - blocks async withHeaders Authorization defaults on cross-origin next pages', async t => {
 	const {seenRequests, fetchFunction} = createRecordedRequestFetch({
 		nextLink: `<${crossOriginNextUrl}>; rel="next"`,
 	});
@@ -1240,12 +1241,12 @@ test.serial('paginate - reapplies async withHeaders Authorization defaults on cr
 		},
 		{
 			url: 'https://evil.example/?page=2',
-			authorization: 'Bearer secret',
+			authorization: null,
 		},
 	]);
 });
 
-test.serial('paginate - reapplies withHeaders defaults after a cross-origin redirect', async t => {
+test.serial('paginate - blocks withHeaders credential defaults after a cross-origin redirect', async t => {
 	const seenRequests = [];
 	const fetchWithHeaders = withHeaders({
 		authorization: 'Bearer secret',
@@ -1293,9 +1294,68 @@ test.serial('paginate - reapplies withHeaders defaults after a cross-origin redi
 		},
 		{
 			url: 'https://cdn.example.net/?page=2',
-			authorization: 'Bearer secret',
-			accept: 'application/json',
+			authorization: null,
+			accept: null,
+			xApiVersion: null,
+		},
+	]);
+});
+
+test.serial('paginate - blocks all withHeaders defaults after a cross-origin redirect', async t => {
+	const seenRequests = [];
+	const fetchWithHeaders = withHeaders({
+		cookie: 'session=abc123',
+		'proxy-authorization': 'Basic c2VjcmV0',
+		'x-api-version': '2026-03',
+		'x-api-key': 'secret-key',
+	})(async (input, options) => {
+		const request = input instanceof Request ? input : new Request(input, options);
+		const page = seenRequests.length + 1;
+
+		seenRequests.push({
+			url: request.url,
+			cookie: request.headers.get('cookie'),
+			proxyAuthorization: request.headers.get('proxy-authorization'),
+			xApiVersion: request.headers.get('x-api-version'),
+			xApiKey: request.headers.get('x-api-key'),
+		});
+
+		return {
+			ok: true,
+			status: 200,
+			url: page === 1 ? 'https://cdn.example.net/?page=1' : request.url,
+			headers: {
+				get(name) {
+					if (name === 'Link' && page === 1) {
+						return redirectedNextPageLink;
+					}
+
+					return undefined;
+				},
+			},
+			json: async () => [page],
+		};
+	});
+
+	const items = await paginate.all('https://api.example.com/?page=1', {
+		fetchFunction: fetchWithHeaders,
+	});
+
+	t.deepEqual(items, [1, 2]);
+	t.deepEqual(seenRequests, [
+		{
+			url: 'https://api.example.com/?page=1',
+			cookie: 'session=abc123',
+			proxyAuthorization: 'Basic c2VjcmV0',
 			xApiVersion: '2026-03',
+			xApiKey: 'secret-key',
+		},
+		{
+			url: 'https://cdn.example.net/?page=2',
+			cookie: null,
+			proxyAuthorization: null,
+			xApiVersion: null,
+			xApiKey: null,
 		},
 	]);
 });
@@ -1338,7 +1398,7 @@ test.serial('paginate - async withHeaders defaults re-resolve per page across cr
 
 	t.deepEqual(items, [1, 2]);
 	t.is(seenRequests[0].xDefault, 'value-1');
-	t.is(seenRequests[1].xDefault, 'value-2');
+	t.is(seenRequests[1].xDefault, null);
 });
 
 test.serial('paginate - stops before fetching an extra page when countLimit is reached', async t => {
@@ -3673,6 +3733,41 @@ test.serial('paginate - preserves explicit Authorization overrides before absolu
 	]);
 });
 
+test.serial('paginate - drops inherited Authorization before absolute next pages from relative input without global location when withBaseUrl resolves the first request', async t => {
+	const previousLocation = globalThis.location;
+	delete globalThis.location;
+	t.teardown(() => {
+		if (previousLocation !== undefined) {
+			globalThis.location = previousLocation;
+		}
+	});
+
+	const {seenRequests, fetchFunction: recordedFetch} = createRelativeAuthorizationRecordedFetch();
+
+	const items = await paginate.all('/api?page=1', {
+		fetchFunction: withBaseUrl('https://example.com')(
+			withHeaders({
+				authorization: 'Bearer secret',
+			})(recordedFetch),
+		),
+		pagination: createRelativeCurrentUrlPaginator({
+			url: new URL('https://evil.example/api?page=2'),
+		}),
+	});
+
+	t.deepEqual(items, [1, 2]);
+	t.deepEqual(seenRequests, [
+		{
+			url: 'https://example.com/api?page=1',
+			authorization: 'Bearer secret',
+		},
+		{
+			url: 'https://evil.example/api?page=2',
+			authorization: null,
+		},
+	]);
+});
+
 test.serial('paginate - preserves explicit Authorization overrides across later same-origin pages', async t => {
 	const seenRequests = [];
 
@@ -5162,7 +5257,26 @@ test('parseLinkHeader - throws for unterminated URL angle bracket', t => {
 
 test('parseLinkHeader - parses link with no parameters', t => {
 	const links = parseLinkHeader('<http://example.com/>');
-	t.deepEqual(links, [{url: 'http://example.com/', parameters: {}}]);
+	t.is(links.length, 1);
+	t.is(links[0].url, 'http://example.com/');
+	t.deepEqual(Object.keys(links[0].parameters), []);
+});
+
+test('parseLinkHeader - does not shadow Object.prototype property names', t => {
+	const [link] = parseLinkHeader('<http://example.com/>; rel="next"; constructor="foo"; tostring="bar"');
+
+	t.is(link.parameters.rel, 'next');
+	t.is(link.parameters.constructor, 'foo');
+	t.is(link.parameters.tostring, 'bar');
+});
+
+test('parseLinkHeader - stores __proto__ parameter as own property', t => {
+	const [link] = parseLinkHeader('<http://example.com/>; __proto__="value"; rel="next"');
+
+	t.true(Object.hasOwn(link.parameters, '__proto__'));
+	// eslint-disable-next-line no-proto
+	t.is(link.parameters.__proto__, 'value');
+	t.is(link.parameters.rel, 'next');
 });
 
 test('parseLinkHeader - handles empty URL', t => {

@@ -3,6 +3,7 @@ import {
 	pipeline,
 	withBaseUrl,
 	withDeduplication,
+	withHeaders,
 	withHttpError,
 	withTimeout,
 } from '../source/index.js';
@@ -354,6 +355,91 @@ test('works with withBaseUrl', async t => {
 		deduplicatedFetch('/api'),
 		deduplicatedFetch('/api'),
 	], {callCount: 1});
+});
+
+test('does not deduplicate when inner wrappers resolve different request headers', async t => {
+	let callCount = 0;
+	const authorizationValues = ['Bearer first', 'Bearer second'];
+
+	const mockFetch = async (_url, options = {}) => {
+		callCount++;
+		const currentCallCount = callCount;
+
+		await new Promise(resolve => {
+			setTimeout(resolve, 50);
+		});
+
+		return Response.json({
+			callCount: currentCallCount,
+			authorization: options.headers?.get('authorization'),
+		});
+	};
+
+	const deduplicatedFetch = pipeline(
+		mockFetch,
+		withHeaders(async () => ({Authorization: authorizationValues.shift()})),
+		withDeduplication(),
+	);
+
+	const [response1, response2] = await Promise.all([
+		deduplicatedFetch('https://example.com/api'),
+		deduplicatedFetch('https://example.com/api'),
+	]);
+
+	t.is(callCount, 2);
+	t.deepEqual(await response1.json(), {
+		callCount: 1,
+		authorization: 'Bearer first',
+	});
+	t.deepEqual(await response2.json(), {
+		callCount: 2,
+		authorization: 'Bearer second',
+	});
+});
+
+test('deduplicated requests reuse an empty resolved header snapshot', async t => {
+	let callCount = 0;
+	let resolveHeadersCallCount = 0;
+
+	const mockFetch = async (_url, options = {}) => {
+		callCount++;
+		await new Promise(resolve => {
+			setTimeout(resolve, 50);
+		});
+
+		return Response.json({
+			callCount,
+			authorization: options.headers?.get('authorization'),
+		});
+	};
+
+	const deduplicatedFetch = pipeline(
+		mockFetch,
+		withHeaders(async () => {
+			resolveHeadersCallCount++;
+
+			return resolveHeadersCallCount <= 2
+				? {}
+				: {Authorization: 'Bearer leaked-second-pass'};
+		}),
+		withDeduplication(),
+	);
+
+	const [response1, response2] = await Promise.all([
+		deduplicatedFetch('https://example.com/api'),
+		deduplicatedFetch('https://example.com/api'),
+	]);
+
+	t.is(callCount, 1);
+	t.is(resolveHeadersCallCount, 2);
+	t.deepEqual(await response1.json(), {
+		callCount: 1,
+		authorization: null,
+	});
+	t.deepEqual(await response2.json(), {
+		callCount: 1,
+		authorization: null,
+	});
 });
 
 test('preserves custom URL resolution metadata for outer wrappers', async t => {

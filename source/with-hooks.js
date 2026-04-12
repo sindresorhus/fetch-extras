@@ -19,16 +19,6 @@ const inheritedHookBodies = new WeakSet();
 Design note: `withHooks` is one function rather than separate `withBeforeRequest`/`withAfterResponse` functions (even though the split would make call-site syntax simpler) because the shared call frame lets `afterResponse` naturally see the options as modified by `beforeRequest`. Two separate wrappers could share this via a WeakMap on the Response, but that trades one coupling for a worse one: hidden global state.
 */
 
-/**
-Wraps a fetch function with hooks that run before each request and after each response.
-
-This is the recommended way to add custom logic (logging, metrics, dynamic headers, response transformation) in documented `pipeline()` order after request-building wrappers, `withRetry()`, and `withTokenRefresh()`, but before `withHttpError()`. Hooks receive the effective request state for their stage, including URL, headers, and replayable body transformations already prepared by upstream wrappers in documented `pipeline()` order. When combined with `withTokenRefresh()`, hooks observe the public call and the final response returned to the caller. The internal refresh retry is not re-hooked.
-
-@param {object} [options]
-@param {(context: {url: string, options: RequestInit}) => RequestInit | Response | void | Promise<RequestInit | Response | void>} [options.beforeRequest] - Called before each request. Receives the resolved URL and the request options. Return a replacement `RequestInit` to modify the request options, return a `Response` to short-circuit the request entirely (skipping the fetch call and `afterResponse`), or return `undefined` to leave them unchanged.
-@param {(context: {url: string, options: RequestInit, response: Response}) => Response | void | Promise<Response | void>} [options.afterResponse] - Called after each response. Receives the resolved URL, the request options, and the response. Return a replacement `Response` to modify the response, or return `undefined` to leave it unchanged.
-@returns {(fetchFunction: typeof fetch) => typeof fetch} A function that accepts a fetch function and returns a wrapped fetch function with hooks.
-*/
 export function withHooks({beforeRequest, afterResponse} = {}) {
 	return fetchFunction => {
 		const setInheritedHookBody = (options, body) => {

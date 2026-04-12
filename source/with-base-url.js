@@ -1,11 +1,8 @@
 import {copyFetchMetadata, resolveRequestUrlSymbol} from './utilities.js';
 
-/**
-Wraps a fetch function to resolve relative URLs against a base URL. Only string-based relative URLs are resolved; absolute URLs and URL objects are passed through unchanged. Protocol-relative URLs are rejected.
+const schemePattern = /^(?<scheme>[a-z][a-z\d+\-.]*:)/i;
+const blockedSpecialSchemeShorthandSchemes = new Set(['http', 'https']);
 
-@param {URL | string} baseUrl - The base URL to resolve relative URLs against.
-@returns {(fetchFunction: typeof fetch) => typeof fetch}
-*/
 export function withBaseUrl(baseUrl) {
 	const baseUrlString = baseUrl instanceof URL ? baseUrl.href : baseUrl;
 
@@ -24,12 +21,51 @@ export function withBaseUrl(baseUrl) {
 			return baseUrlObject;
 		};
 
-		const resolveRequestUrl = urlOrRequest => {
-			if (typeof urlOrRequest !== 'string') {
-				return urlOrRequest instanceof Request ? urlOrRequest.url : String(urlOrRequest);
+		const shouldBypassBaseUrl = input => {
+			const match = schemePattern.exec(input);
+			if (!match) {
+				return false;
 			}
 
-			if (/^[a-z][a-z\d+\-.]*:/i.test(urlOrRequest)) {
+			return true;
+		};
+
+		const isUnsupportedSpecialSchemeShorthand = input => {
+			const match = schemePattern.exec(input);
+			if (!match) {
+				return false;
+			}
+
+			const scheme = match.groups.scheme.slice(0, -1).toLowerCase();
+			return blockedSpecialSchemeShorthandSchemes.has(scheme) && !input.startsWith(`${match[0]}//`);
+		};
+
+		const resolveRequestUrl = urlOrRequest => {
+			if (urlOrRequest instanceof Request) {
+				return urlOrRequest.url;
+			}
+
+			if (urlOrRequest instanceof URL) {
+				return urlOrRequest.href;
+			}
+
+			if (typeof urlOrRequest !== 'string') {
+				urlOrRequest = String(urlOrRequest);
+			}
+
+			if (isUnsupportedSpecialSchemeShorthand(urlOrRequest)) {
+				/*
+				Boundary: although fetch accepts `http:foo` / `https:foo` and normalizes them as absolute URLs, this wrapper intentionally does not support those shorthand forms.
+				In a base-URL helper they are too easy to misread as ordinary explicit web URLs, so we keep the contract smaller and require `http://` / `https://` for pass-through absolute web inputs.
+				*/
+				throw new TypeError('Special-scheme URLs without `//` are unsupported.');
+			}
+
+			if (shouldBypassBaseUrl(urlOrRequest)) {
+				/*
+				Explicit absolute string inputs intentionally bypass base-URL joining.
+				Do not "fix" this by rejecting cross-origin absolute URLs.
+				*/
 				return urlOrRequest;
 			}
 
@@ -56,10 +92,16 @@ export function withBaseUrl(baseUrl) {
 			return new URL(urlOrRequest.replace(/^\/+/, ''), baseUrlForPath).href;
 		};
 
-		const fetchWithBaseUrl = async (urlOrRequest, options = {}) => fetchFunction(
-			typeof urlOrRequest === 'string' ? resolveRequestUrl(urlOrRequest) : urlOrRequest,
-			options,
-		);
+		const fetchWithBaseUrl = async (urlOrRequest, options = {}) => {
+			const resolvedRequestUrl = resolveRequestUrl(urlOrRequest);
+
+			return fetchFunction(
+				urlOrRequest instanceof Request || urlOrRequest instanceof URL
+					? urlOrRequest
+					: resolvedRequestUrl,
+				options,
+			);
+		};
 
 		fetchWithBaseUrl[resolveRequestUrlSymbol] = resolveRequestUrl;
 

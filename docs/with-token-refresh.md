@@ -4,9 +4,11 @@
 
 Wraps a fetch function to automatically refresh the token and retry the request on a `401 Unauthorized` response.
 
-On a 401 response, calls `refreshToken` to obtain a new token, then retries the request once with `Authorization: Bearer <token>`. If the refresh fails or the retry also returns a non-2xx status, the response is returned as-is. Abort signals are still respected and will reject the call.
+On a 401 response, calls `refreshToken` to obtain a new token, then retries the request once with `Authorization: Bearer <token>`. Requests that already use a non-bearer `Authorization` scheme are returned as-is, because this wrapper only knows how to refresh bearer tokens. Refresh failures or retries that still return a non-2xx status are also returned as-is. Abort signals are still respected and will reject the call.
 
-Concurrent 401 responses that overlap while a refresh is still pending share a single `refreshToken` call when they have the same effective `Authorization` header, preventing token invalidation races across requests for the same auth context. Requests with different effective `Authorization` headers refresh separately.
+Concurrent 401 responses that overlap while a refresh is still pending share a single `refreshToken` call when they have the same resolved request origin and effective `Authorization` header, preventing token invalidation races across requests for the same auth context. Requests on different origins or with different effective `Authorization` headers refresh separately.
+
+When a request URL cannot be resolved to an absolute origin, deduplication stays conservative and only shares within the same wrapped fetch function.
 
 > [!IMPORTANT]
 > Deduplication only applies while the refresh promise is still pending. Once it settles, it is forgotten immediately. A later `401` starts a new refresh on purpose instead of reusing a settled token result.
@@ -20,11 +22,11 @@ Concurrent 401 responses that overlap while a refresh is still pending share a s
 ## Parameters
 
 - `options` (`object`)
-	- `refreshToken` (`() => string | Promise<string>`) - Called when a 401 response is received. Should return the new token string.
+	- `refreshToken` (`() => string | Promise<string>`) - Called when a 401 response is received and the request is anonymous or already uses bearer auth. Should return the new token string.
 
 ## Returns
 
-A function that takes a fetch function and returns a wrapped fetch function that retries once with a refreshed `Authorization: Bearer <token>` header on 401 responses.
+A function that takes a fetch function and returns a wrapped fetch function that retries once with a refreshed `Authorization: Bearer <token>` header on 401 responses, unless the request already used a different `Authorization` scheme.
 
 ## Example
 

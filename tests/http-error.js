@@ -53,6 +53,18 @@ test('HttpError - empty statusText produces clean message without trailing space
 	t.is(error.message, 'Request failed with status code 404: https://example.com/api');
 });
 
+test('HttpError - redacts URL credentials from the message', t => {
+	const response = {
+		ok: false,
+		status: 401,
+		statusText: 'Unauthorized',
+		url: 'https://user:secret@example.com/api',
+	};
+	const error = new HttpError(response);
+
+	t.is(error.message, 'Request failed with status code 401 Unauthorized: https://example.com/api');
+});
+
 test('HttpError - has ERR_HTTP_RESPONSE_NOT_OK code', t => {
 	const response = {
 		ok: false,

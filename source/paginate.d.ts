@@ -35,7 +35,7 @@ export type PaginationOptions<ItemType = unknown> = {
 
 	**Important**: The response body has already been consumed by the `transform` function. Do NOT call `response.json()` or other body methods here. Instead, extract pagination info from headers, the URL, or share data from the transform function through closure.
 
-	**Note**: Returning `headers` replaces all inherited headers, consistent with standard Fetch API behavior. When the next page crosses to a different origin, inherited request headers are already cleared before your returned headers are applied. Then wrappers such as `withHeaders()` run again for that next page. Setting `body` to `undefined` will strip body-related headers (`Content-Type`, `Content-Length`, etc.) from the request. Function-based `withHeaders()` defaults are still resolved per page after that merge.
+	**Note**: Returning `headers` replaces all inherited headers, consistent with standard Fetch API behavior. When the next page crosses to a different origin, inherited request headers are already cleared before your returned headers are applied, and automatic default headers from wrappers such as `withHeaders()` stay blocked unless you return them explicitly for that next page. Setting `body` to `undefined` will strip body-related headers (`Content-Type`, `Content-Length`, etc.) from the request. Function-based `withHeaders()` defaults are still resolved per page after that merge.
 
 	@param data - Context object with response, current URL, and items.
 	@returns Options for the next fetch request, or `false` to stop pagination.
@@ -238,7 +238,7 @@ By default, it automatically follows RFC 5988 `Link` headers with `rel="next"`.
 
 **Note**: This function does not check response status codes. If you need error handling for non-2xx responses, wrap fetch with `withHttpError()` or handle errors in your `transform` function.
 
-**Important**: When pagination crosses to a different origin, inherited request headers are cleared before the next request is built. Then wrappers like `withHeaders()` run again for that next page. If you intentionally need extra per-page headers on the new origin, return them explicitly from `pagination.paginate`.
+**Important**: When pagination crosses to a different origin, inherited request headers are cleared before the next request is built, and automatic default headers from wrappers such as `withHeaders()` are blocked from being re-applied automatically on later pages. If you intentionally need headers on the new origin, return them explicitly from `pagination.paginate`.
 
 **Note**: Later pages are new requests. If your `fetchFunction` uses `withHeaders()`, its defaults still apply on each page. Function-based defaults are re-resolved for each page instead of being frozen from the first page.
 

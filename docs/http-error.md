@@ -4,6 +4,8 @@
 
 Custom error class for HTTP errors that should be thrown when the response has a non-2xx status code.
 
+The error message includes the response URL, but embedded URL credentials are redacted from that message. The original `response.url` is still available on `error.response`.
+
 ```js
 import {HttpError, throwIfHttpError} from 'fetch-extras';
 

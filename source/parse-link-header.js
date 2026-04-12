@@ -62,13 +62,6 @@ function splitHeaderValue(value, separator) {
 	return parts;
 }
 
-/**
-Parses an RFC 5988 Link header into an array of link objects.
-
-@param {string} linkHeader - The Link header value.
-@returns {Array<{url: string, parameters: Object}>} Parsed links with normalized parameter values.
-@throws {Error} If the Link header format is invalid.
-*/
 export default function parseLinkHeader(linkHeader) {
 	const links = [];
 	const parts = splitHeaderValue(linkHeader, ',');
@@ -82,7 +75,7 @@ export default function parseLinkHeader(linkHeader) {
 		}
 
 		const url = trimmedUrlReference.slice(1, -1);
-		const parameters = {};
+		const parameters = Object.create(null);
 
 		for (const parameter of rawLinkParameters) {
 			const trimmedParameter = parameter.trim();
