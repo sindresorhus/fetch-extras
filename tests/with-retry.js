@@ -125,6 +125,35 @@ test('retries on Failed to fetch hostname variant and succeeds', async t => {
 	t.is(mockFetch.callCount, 2);
 });
 
+test('retries on Safari Load failed domain variant and succeeds', async t => {
+	const error = new TypeError('Load failed (api.example.com)');
+	error.stack = undefined;
+
+	const mockFetch = createMockFetch([
+		error,
+		createResponse(200),
+	]);
+	const fetchWithRetry = withRetry({backoff: () => 0})(mockFetch);
+
+	const response = await fetchWithRetry('https://example.com');
+	t.is(response.status, 200);
+	t.is(mockFetch.callCount, 2);
+});
+
+test('does not retry stacked Safari Load failed domain variant', async t => {
+	const error = new TypeError('Load failed (api.example.com)');
+	const mockFetch = createMockFetch([
+		error,
+		createResponse(200),
+	]);
+	const fetchWithRetry = withRetry({backoff: () => 0})(mockFetch);
+
+	await t.throwsAsync(fetchWithRetry('https://example.com'), {
+		is: error,
+	});
+	t.is(mockFetch.callCount, 1);
+});
+
 test('retries on network error and succeeds for Request input', async t => {
 	const mockFetch = createMockFetch([
 		networkError(),
