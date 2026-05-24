@@ -77,7 +77,11 @@ Listed in the recommended [`pipeline`](docs/pipeline.md) order. Read the list to
 - [`withTokenRefresh`](docs/with-token-refresh.md) - Auto-refresh auth tokens on 401 and retry
 - [`withHooks`](docs/with-hooks.md) - `beforeRequest` and `afterResponse` hooks
 - [`withHttpError`](docs/http-error.md#withhttperrorfetchfunction) - Throw on non-2xx responses
-- [`withJsonResponse`](docs/with-json-response.md) - Parse response as JSON, with optional [Standard Schema](https://standardschema.dev) validation *(place last in pipeline)*
+
+Choose one terminal response wrapper:
+
+- [`withJsonResponse`](docs/with-json-response.md) - Parse response as JSON, with optional [Standard Schema](https://standardschema.dev) validation
+- [`withResponse`](docs/with-response.md) - Transform the final response into any value
 
 ### Utilities
 

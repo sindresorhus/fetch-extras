@@ -80,7 +80,7 @@ export function withHooks(
 		/**
 		Called after each response. Receives the response, resolved URL, and the same effective request options used for that hooked request.
 
-		Return a replacement `Response` to modify the response, or return `undefined` to leave it unchanged.
+		Return a replacement `Response` to modify the response, or return `undefined` to leave it unchanged. Use `withResponse` instead when the wrapped fetch function should resolve to parsed or transformed data.
 		*/
 		readonly afterResponse?: (context: {
 			readonly url: string;

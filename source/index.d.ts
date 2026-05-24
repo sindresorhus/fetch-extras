@@ -27,4 +27,5 @@ export {
 	type StandardSchemaV1InferOutput,
 	type StandardSchemaV1Issue,
 } from './with-json-response.js';
+export {withResponse, type ResponseTransform} from './with-response.js';
 export {pipeline} from './pipeline.js';

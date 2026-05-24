@@ -15,4 +15,5 @@ export {withRetry} from './with-retry.js';
 export {withHooks} from './with-hooks.js';
 export {paginate} from './paginate.js';
 export {SchemaValidationError, withJsonResponse} from './with-json-response.js';
+export {withResponse} from './with-response.js';
 export {pipeline} from './pipeline.js';

@@ -10,7 +10,7 @@ This is the recommended way to add custom logic (logging, metrics, dynamic heade
 
 - `options` (`object`)
   - `beforeRequest` (`(context) => RequestInit | Response | void | Promise<RequestInit | Response | void>`) - Called before each request. The context object has `{url, options}` where `url` is the resolved URL string and `options` is the effective `RequestInit` for that stage. Return a replacement `RequestInit` to modify the request options, return a `Response` to short-circuit the request entirely (skipping the fetch call and `afterResponse`), or return `undefined` to leave them unchanged.
-  - `afterResponse` (`(context) => Response | void | Promise<Response | void>`) - Called after each response. The context object has `{url, options, response}` where `options` is the same effective `RequestInit` used for that hooked request. Return a replacement `Response` to modify the response, or return `undefined` to leave it unchanged.
+  - `afterResponse` (`(context) => Response | void | Promise<Response | void>`) - Called after each response. The context object has `{url, options, response}` where `options` is the same effective `RequestInit` used for that hooked request. Return a replacement `Response` to modify the response, or return `undefined` to leave it unchanged. Use [`withResponse`](with-response.md) instead when the wrapped fetch function should resolve to parsed or transformed data.
 
 ## Returns
 

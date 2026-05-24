@@ -11,9 +11,11 @@ import {
 	withJsonBody,
 	withJsonResponse,
 	withRateLimit,
+	withResponse,
 	withSearchParameters,
 	withTimeout,
 	withTokenRefresh,
+	type ResponseTransform,
 	type StandardSchemaV1,
 	type StandardSchemaV1InferOutput,
 	type StandardSchemaV1Issue,
@@ -233,6 +235,36 @@ const fetchUserPipeline = pipeline(
 );
 const pipelineUser: Promise<User> = fetchUserPipeline('/users/1');
 void pipelineUser;
+
+// WithResponse
+const responseTransform: ResponseTransform<string> = async response => response.text();
+
+const fetchText = withResponse(responseTransform)(fetch);
+const text: Promise<string> = fetchText('/api/text');
+void text;
+
+const fetchStatus = withResponse(response => response.status)(fetch);
+const status: Promise<number> = fetchStatus('/api/status');
+void status;
+
+const fetchEmptyJson = withResponse(async response => {
+	if (response.status === 204 || response.status === 205) {
+		return undefined;
+	}
+
+	return response.json();
+})(fetch);
+const emptyJson: Promise<unknown> = fetchEmptyJson('/api/empty');
+void emptyJson;
+
+const fetchTextPipeline = pipeline(
+	fetch,
+	withTimeout(5000),
+	withHttpError(),
+	withResponse(async response => response.text()),
+);
+const pipelineText: Promise<string> = fetchTextPipeline('/api/text');
+void pipelineText;
 
 // WithJsonResponse infers output type from schema types
 type InferredOutput = StandardSchemaV1InferOutput<typeof userSchema>;
