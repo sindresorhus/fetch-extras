@@ -16,7 +16,7 @@ When all retries are exhausted, the last response is returned (for HTTP status r
   - `statusCodes` (`number[]`) - HTTP status codes that trigger a retry. Default: `[408, 429, 500, 502, 503, 504]`.
   - `maxRetryAfter` (`number`) - Maximum `Retry-After` duration in milliseconds. If the server requests a longer delay, the response is returned without retrying. Default: `60_000`.
   - `backoff` (`(attemptNumber: number) => number`) - Function returning the delay in milliseconds before a retry. Receives the 1-based attempt number that just failed. Default: exponential backoff with jitter (`min(1000 * 2^(attempt-1), 30000) * random(0.5, 1.0)`).
-  - `shouldRetry` (`(context) => boolean | Promise<boolean>`) - Called after built-in checks pass, before retrying. Return `false` to stop retrying. The context object has `{error?, response?, attemptNumber, retriesLeft}`. For network errors, `error` is set. For HTTP status retries, `response` is set. Do not consume the `response` body. If you need to inspect the body, clone the response first.
+  - `shouldRetry` (`(context) => boolean | Promise<boolean>`) - Called after built-in checks pass, before retrying. Return `false` to stop retrying. The context object has `{error?, response?, attemptNumber, retriesLeft}`. For network errors, `error` is set. For HTTP status retries, `response` is set. Can also be used for retry logging or metrics. Return `true` to keep retrying. Do not consume the `response` body. If you need to inspect the body, clone the response first.
 
 ## Returns
 
@@ -60,6 +60,27 @@ const fetchWithRetry = withRetry({
 	},
 })(fetch);
 ```
+
+Logging retries:
+
+```js
+import {withRetry} from 'fetch-extras';
+
+const fetchWithRetry = withRetry({
+	shouldRetry({error, response, attemptNumber, retriesLeft}) {
+		console.log('Retrying request', {
+			attemptNumber,
+			retriesLeft,
+			error,
+			status: response?.status,
+		});
+
+		return true;
+	},
+})(fetch);
+```
+
+`shouldRetry` can also be used for retry logging or metrics. It is called after the built-in retry checks pass, before the retry delay. Return `true` to keep retrying.
 
 Can be combined with other `with*` functions:
 

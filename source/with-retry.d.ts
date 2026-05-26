@@ -47,6 +47,27 @@ const fetchWithRetry = withRetry({
 
 @example
 ```
+import {withRetry} from 'fetch-extras';
+
+// Logging retries
+const fetchWithRetry = withRetry({
+	shouldRetry({error, response, attemptNumber, retriesLeft}) {
+		console.log('Retrying request', {
+			attemptNumber,
+			retriesLeft,
+			error,
+			status: response?.status,
+		});
+
+		return true;
+	},
+})(fetch);
+```
+
+`shouldRetry` can also be used for retry logging or metrics. It is called after the built-in retry checks pass, before the retry delay. Return `true` to keep retrying.
+
+@example
+```
 import {pipeline, withHttpError, withRetry, withBaseUrl, withTimeout} from 'fetch-extras';
 
 const apiFetch = pipeline(
@@ -101,6 +122,8 @@ export function withRetry(
 		Called after built-in checks pass, before retrying. Return `false` to stop retrying.
 
 		For network errors, `error` is set. For HTTP status retries, `response` is set.
+
+		Can also be used for retry logging or metrics. Return `true` to keep retrying.
 
 		Do not consume the `response` body. If you need to inspect the body, clone the response first.
 		*/
