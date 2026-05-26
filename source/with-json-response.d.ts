@@ -22,8 +22,8 @@ type StandardSchemaV1Types<InputType, OutputType> = {
 	readonly output: OutputType;
 };
 
-type StandardSchemaV1Options = {
-	readonly libraryOptions?: Readonly<Record<string, unknown>> | undefined;
+export type StandardSchemaV1Options = {
+	readonly libraryOptions?: Record<string, unknown> | undefined;
 };
 
 export type StandardSchemaV1<InputType = unknown, OutputType = InputType> = {
@@ -141,6 +141,7 @@ Empty responses are not special-cased. If the response body is empty, including 
 
 @param options - Options object.
 @param options.schema - A Standard Schema object to validate response JSON against.
+@param options.schemaOptions - Standard Schema options passed as the second argument to `schema['~standard'].validate()`. Use `schemaOptions.libraryOptions` for validator-specific options.
 @returns A wrapper that takes a fetch function and returns a wrapped fetch function that returns the validated data.
 @throws {SyntaxError} When the response body is empty or is not valid JSON.
 @throws {SchemaValidationError} When the response JSON does not match the schema.
@@ -153,6 +154,25 @@ import {z} from 'zod';
 const userSchema = z.object({name: z.string(), age: z.number()});
 
 const fetchUser = withJsonResponse({schema: userSchema})(fetch);
+const user = await fetchUser('/api/user/1');
+
+console.log(user.name);
+```
+
+@example
+```
+import {withJsonResponse} from 'fetch-extras';
+import {z} from 'zod';
+
+const fetchUser = withJsonResponse({
+	schema: z.object({name: z.string()}),
+	schemaOptions: {
+		libraryOptions: {
+			// Validator-specific Standard Schema options.
+		},
+	},
+})(fetch);
+
 const user = await fetchUser('/api/user/1');
 
 console.log(user.name);
@@ -178,7 +198,10 @@ const user = await fetchUser('/api/user/1');
 export function withJsonResponse<
 	Schema extends StandardSchemaV1 | undefined = undefined,
 >(
-	options?: {schema?: Schema},
+	options?: {
+		schema?: Schema;
+		schemaOptions?: StandardSchemaV1Options;
+	},
 ): (
 	fetchFunction: typeof fetch,
 ) => (...arguments_: Parameters<typeof fetch>) => Promise<Schema extends StandardSchemaV1 ? StandardSchemaV1InferOutput<Schema> : unknown>;

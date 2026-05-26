@@ -83,6 +83,23 @@ test('validates JSON response with schema and returns validated value', async t 
 	t.deepEqual(result, {name: 'Alice', age: 30});
 });
 
+test('passes Standard Schema options to schema validation', async t => {
+	const mockFetch = createMockFetch({name: 'Alice', age: 30});
+	const schemaOptions = {
+		libraryOptions: {
+			abortEarly: true,
+		},
+	};
+	const schema = createMockSchema((value, options) => {
+		t.is(options, schemaOptions);
+		return {value};
+	});
+	const fetchWithSchema = withJsonResponse({schema, schemaOptions})(mockFetch);
+
+	const result = await fetchWithSchema('/api/user');
+	t.deepEqual(result, {name: 'Alice', age: 30});
+});
+
 test('schema can transform the value', async t => {
 	const mockFetch = createMockFetch({name: 'Alice', age: '30'});
 	const schema = createMockSchema(value => ({value: {...value, age: Number(value.age)}}));

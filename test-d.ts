@@ -19,6 +19,7 @@ import {
 	type StandardSchemaV1,
 	type StandardSchemaV1InferOutput,
 	type StandardSchemaV1Issue,
+	type StandardSchemaV1Options,
 } from './source/index.js';
 
 const result: number = pipeline(
@@ -218,6 +219,15 @@ const userSchema: StandardSchemaV1<unknown, User> = {
 const fetchUser = withJsonResponse({schema: userSchema})(fetch);
 const user: Promise<User> = fetchUser('/api/user');
 void user;
+
+const schemaOptions: StandardSchemaV1Options = {
+	libraryOptions: {
+		abortEarly: true,
+	},
+};
+const fetchUserWithSchemaOptions = withJsonResponse({schema: userSchema, schemaOptions})(fetch);
+const userWithSchemaOptions: Promise<User> = fetchUserWithSchemaOptions('/api/user');
+void userWithSchemaOptions;
 
 const enabled = Math.random() > 0.5;
 const maybeSchemaOptions = enabled ? {schema: userSchema} : {};

@@ -12,7 +12,7 @@ export class SchemaValidationError extends Error {
 	}
 }
 
-export function withJsonResponse({schema} = {}) {
+export function withJsonResponse({schema, schemaOptions} = {}) {
 	if (schema !== undefined && typeof schema?.['~standard']?.validate !== 'function') {
 		throw new TypeError('The `schema` option must be a Standard Schema object (https://standardschema.dev)');
 	}
@@ -30,7 +30,7 @@ export function withJsonResponse({schema} = {}) {
 				return jsonValue;
 			}
 
-			const result = await schema['~standard'].validate(jsonValue);
+			const result = await schema['~standard'].validate(jsonValue, schemaOptions);
 
 			if (result.issues) {
 				throw new SchemaValidationError(result.issues, response);

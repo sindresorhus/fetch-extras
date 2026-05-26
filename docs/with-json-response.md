@@ -14,6 +14,7 @@ Empty responses are not special-cased. If the response body is empty, including 
 
 - `options` (optional)
   - `schema` (`StandardSchemaV1`) - A Standard Schema object to validate response JSON against.
+  - `schemaOptions` (`StandardSchemaV1Options`) - Standard Schema options passed as the second argument to `schema['~standard'].validate()`. Use `schemaOptions.libraryOptions` for validator-specific options.
 
 ## Returns
 
@@ -44,6 +45,26 @@ import {z} from 'zod';
 const userSchema = z.object({name: z.string(), age: z.number()});
 
 const fetchUser = withJsonResponse({schema: userSchema})(fetch);
+const user = await fetchUser('/api/user/1');
+
+console.log(user.name);
+```
+
+With Standard Schema options:
+
+```js
+import {withJsonResponse} from 'fetch-extras';
+import {z} from 'zod';
+
+const fetchUser = withJsonResponse({
+	schema: z.object({name: z.string()}),
+	schemaOptions: {
+		libraryOptions: {
+			// Validator-specific Standard Schema options.
+		},
+	},
+})(fetch);
+
 const user = await fetchUser('/api/user/1');
 
 console.log(user.name);
