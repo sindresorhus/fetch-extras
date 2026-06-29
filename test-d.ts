@@ -4,7 +4,9 @@ import {
 	throwIfHttpError,
 	withBaseUrl,
 	withCache,
+	withConcurrency,
 	withDeduplication,
+	withDownloadProgress,
 	withHeaders,
 	withHooks,
 	withHttpError,
@@ -12,9 +14,11 @@ import {
 	withJsonResponse,
 	withRateLimit,
 	withResponse,
+	withRetry,
 	withSearchParameters,
 	withTimeout,
 	withTokenRefresh,
+	withUploadProgress,
 	type ResponseTransform,
 	type StandardSchemaV1,
 	type StandardSchemaV1InferOutput,
@@ -129,7 +133,7 @@ const jsonPipelineFetch = pipeline(
 	withJsonBody(),
 	withHttpError(),
 );
-const jsonPipelineResponse: Promise<Response> = jsonPipelineFetch('/users', {method: 'POST', body: JSON.stringify({name: 'Alice'})});
+const jsonPipelineResponse: Promise<Response> = jsonPipelineFetch('/users', {method: 'POST', body: {name: 'Alice'}});
 
 const customFetchWithProperty = Object.assign(fetch, {customProperty: 'value'});
 const wrappedCustomFetch = withHttpError()(customFetchWithProperty);
@@ -188,6 +192,8 @@ void noHooksResponse;
 const fetchJson = withJsonResponse()(fetch);
 const jsonData: Promise<unknown> = fetchJson('/api/data');
 void jsonData;
+// @ts-expect-error withJsonResponse does not widen request bodies by itself.
+void fetchJson('/api/data', {method: 'POST', body: {name: 'Alice'}});
 
 const fetchJsonWithEmptyOptions = withJsonResponse({})(fetch);
 const jsonDataWithEmptyOptions: Promise<unknown> = fetchJsonWithEmptyOptions('/api/data');
@@ -202,6 +208,21 @@ const fetchJsonPipeline = pipeline(
 );
 const pipelineJson: Promise<unknown> = fetchJsonPipeline('/api/data');
 void pipelineJson;
+
+const fetchJsonBodyPipeline = pipeline(
+	fetch,
+	withJsonBody(),
+	withJsonResponse(),
+);
+const jsonBodyPipelineData: Promise<unknown> = fetchJsonBodyPipeline('/api/data', {method: 'POST', body: {}});
+const jsonArrayBodyPipelineData: Promise<unknown> = fetchJsonBodyPipeline('/api/data', {method: 'POST', body: []});
+const jsonReadonlyArrayBodyPipelineData: Promise<unknown> = fetchJsonBodyPipeline('/api/data', {method: 'POST', body: ['Alice'] as const});
+// @ts-expect-error withJsonResponse returns parsed data, not a Response.
+const jsonBodyPipelineResponse: Promise<Response> = fetchJsonBodyPipeline('/api/data', {method: 'POST', body: {}});
+void jsonBodyPipelineData;
+void jsonArrayBodyPipelineData;
+void jsonReadonlyArrayBodyPipelineData;
+void jsonBodyPipelineResponse;
 
 // `withJsonResponse` (with schema)
 type User = {name: string; age: number};
@@ -246,12 +267,93 @@ const fetchUserPipeline = pipeline(
 const pipelineUser: Promise<User> = fetchUserPipeline('/users/1');
 void pipelineUser;
 
+const fetchUserJsonBodyPipeline = pipeline(
+	fetch,
+	withJsonBody(),
+	withHttpError(),
+	withJsonResponse({schema: userSchema}),
+);
+const jsonBodyPipelineUser: Promise<User> = fetchUserJsonBodyPipeline('/users', {method: 'POST', body: {name: 'Alice'}});
+// @ts-expect-error withJsonResponse with schema returns validated data, not a Response.
+const jsonBodyPipelineUserResponse: Promise<Response> = fetchUserJsonBodyPipeline('/users', {method: 'POST', body: {name: 'Alice'}});
+void jsonBodyPipelineUser;
+void jsonBodyPipelineUserResponse;
+
+const fetchUserJsonBodyRequestBuilderPipeline = pipeline(
+	fetch,
+	withTimeout(5000),
+	withBaseUrl('https://api.example.com'),
+	withSearchParameters({apiKey: 'token'}),
+	withHeaders({authorization: 'Bearer token'}),
+	withJsonBody(),
+	withHttpError(),
+	withJsonResponse({schema: userSchema}),
+);
+const jsonBodyRequestBuilderUser: Promise<User> = fetchUserJsonBodyRequestBuilderPipeline('/users', {method: 'POST', body: {name: 'Alice'}});
+void jsonBodyRequestBuilderUser;
+
+const fetchUserJsonBodyHooksPipeline = pipeline(
+	fetch,
+	withJsonBody(),
+	withHooks(),
+	withHttpError(),
+	withJsonResponse({schema: userSchema}),
+);
+const jsonBodyHooksUser: Promise<User> = fetchUserJsonBodyHooksPipeline('/users', {method: 'POST', body: {name: 'Alice'}});
+void jsonBodyHooksUser;
+
+const fetchUserJsonBodyRetryPipeline = pipeline(
+	fetch,
+	withJsonBody(),
+	withRetry({methods: ['POST']}),
+	withTokenRefresh({refreshToken: () => 'token'}),
+	withHttpError(),
+	withJsonResponse({schema: userSchema}),
+);
+const jsonBodyRetryUser: Promise<User> = fetchUserJsonBodyRetryPipeline('/users', {method: 'POST', body: {name: 'Alice'}});
+void jsonBodyRetryUser;
+
+const fetchUserJsonBodyQueuedPipeline = pipeline(
+	fetch,
+	withJsonBody(),
+	withRateLimit({requestsPerInterval: 10, interval: 1000}),
+	withConcurrency({maxConcurrentRequests: 2}),
+	withHttpError(),
+	withJsonResponse({schema: userSchema}),
+);
+const jsonBodyQueuedUser: Promise<User> = fetchUserJsonBodyQueuedPipeline('/users', {method: 'POST', body: {name: 'Alice'}});
+void jsonBodyQueuedUser;
+
+const fetchUserJsonBodyStoragePipeline = pipeline(
+	fetch,
+	withJsonBody(),
+	withDeduplication(),
+	withCache({ttl: 1000}),
+	withHttpError(),
+	withJsonResponse({schema: userSchema}),
+);
+const jsonBodyStorageUser: Promise<User> = fetchUserJsonBodyStoragePipeline('/users', {method: 'POST', body: {name: 'Alice'}});
+void jsonBodyStorageUser;
+
+const fetchUserJsonBodyProgressPipeline = pipeline(
+	fetch,
+	withJsonBody(),
+	withDownloadProgress(),
+	withUploadProgress(),
+	withHttpError(),
+	withJsonResponse({schema: userSchema}),
+);
+const jsonBodyProgressUser: Promise<User> = fetchUserJsonBodyProgressPipeline('/users', {method: 'POST', body: {name: 'Alice'}});
+void jsonBodyProgressUser;
+
 // WithResponse
 const responseTransform: ResponseTransform<string> = async response => response.text();
 
 const fetchText = withResponse(responseTransform)(fetch);
 const text: Promise<string> = fetchText('/api/text');
 void text;
+// @ts-expect-error withResponse does not widen request bodies by itself.
+void fetchText('/api/text', {method: 'POST', body: {name: 'Alice'}});
 
 const fetchStatus = withResponse(response => response.status)(fetch);
 const status: Promise<number> = fetchStatus('/api/status');
@@ -275,6 +377,17 @@ const fetchTextPipeline = pipeline(
 );
 const pipelineText: Promise<string> = fetchTextPipeline('/api/text');
 void pipelineText;
+
+const fetchTextJsonBodyPipeline = pipeline(
+	fetch,
+	withJsonBody(),
+	withHttpError(),
+	withResponse(async response => response.text()),
+);
+const jsonObjectBodyPipelineText: Promise<string> = fetchTextJsonBodyPipeline('/api/text', {method: 'POST', body: {name: 'Alice'}});
+const jsonArrayBodyPipelineText: Promise<string> = fetchTextJsonBodyPipeline('/api/text', {method: 'POST', body: []});
+void jsonObjectBodyPipelineText;
+void jsonArrayBodyPipelineText;
 
 // WithJsonResponse infers output type from schema types
 type InferredOutput = StandardSchemaV1InferOutput<typeof userSchema>;

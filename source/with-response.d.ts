@@ -40,6 +40,6 @@ const text = await fetchText('/api/message');
 */
 export function withResponse<Value>(
 	transform: ResponseTransform<Value>,
-): (
-	fetchFunction: typeof fetch,
-) => (...arguments_: Parameters<typeof fetch>) => Promise<Awaited<Value>>;
+): <FetchFunction extends typeof fetch>(
+	fetchFunction: FetchFunction
+) => (...arguments_: Parameters<FetchFunction>) => Promise<Awaited<Value>>;

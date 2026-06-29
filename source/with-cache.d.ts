@@ -52,4 +52,6 @@ export function withCache(
 		*/
 		ttl: number;
 	},
-): (fetchFunction: typeof fetch) => typeof fetch;
+): <FetchFunction extends typeof fetch>(
+	fetchFunction: FetchFunction
+) => (...arguments_: Parameters<FetchFunction>) => Promise<Response>;

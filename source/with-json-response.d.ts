@@ -126,9 +126,9 @@ const fetchJson = pipeline(
 const data = await fetchJson('/api/user/1');
 ```
 */
-export function withJsonResponse(): (
-	fetchFunction: typeof fetch,
-) => (...arguments_: Parameters<typeof fetch>) => Promise<unknown>;
+export function withJsonResponse(): <FetchFunction extends typeof fetch>(
+	fetchFunction: FetchFunction
+) => (...arguments_: Parameters<FetchFunction>) => Promise<unknown>;
 
 /**
 Wraps a fetch function to automatically parse response bodies as JSON and validate against a [Standard Schema](https://standardschema.dev).
@@ -202,6 +202,6 @@ export function withJsonResponse<
 		schema?: Schema;
 		schemaOptions?: StandardSchemaV1Options;
 	},
-): (
-	fetchFunction: typeof fetch,
-) => (...arguments_: Parameters<typeof fetch>) => Promise<Schema extends StandardSchemaV1 ? StandardSchemaV1InferOutput<Schema> : unknown>;
+): <FetchFunction extends typeof fetch>(
+	fetchFunction: FetchFunction
+) => (...arguments_: Parameters<FetchFunction>) => Promise<Schema extends StandardSchemaV1 ? StandardSchemaV1InferOutput<Schema> : unknown>;

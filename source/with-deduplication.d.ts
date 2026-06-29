@@ -42,4 +42,6 @@ const apiFetch = pipeline(
 const response = await apiFetch('/users');
 ```
 */
-export function withDeduplication(): (fetchFunction: typeof fetch) => typeof fetch;
+export function withDeduplication(): <FetchFunction extends typeof fetch>(
+	fetchFunction: FetchFunction
+) => (...arguments_: Parameters<FetchFunction>) => Promise<Response>;

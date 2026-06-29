@@ -48,6 +48,7 @@ const response = await apiFetch('/users', {
 });
 ```
 */
+// This wrapper intentionally defines the widened request tuple instead of preserving `Parameters<FetchFunction>`. Later transparent wrappers preserve this returned tuple.
 export function withJsonBody(): (
 	fetchFunction: typeof fetch
 ) => (input: RequestInfo | URL, init?: JsonBodyRequestInit) => Promise<Response>;

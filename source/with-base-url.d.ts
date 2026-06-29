@@ -68,4 +68,6 @@ for await (const commit of paginate('/repos/sindresorhus/ky/commits', {fetchFunc
 */
 export function withBaseUrl(
 	baseUrl: URL | string
-): (fetchFunction: typeof fetch) => typeof fetch;
+): <FetchFunction extends typeof fetch>(
+	fetchFunction: FetchFunction
+) => (...arguments_: Parameters<FetchFunction>) => Promise<Response>;
